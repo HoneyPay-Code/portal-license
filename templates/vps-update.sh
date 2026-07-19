@@ -264,11 +264,35 @@ if [ -z "$COMPOSE_FILES" ]; then
   fi
 fi
 echo "Compose: $COMPOSE_FILES"
+
+# Snapshot das credenciais DB antes do up (detectar rotação acidental).
+STACK_ENV="$INSTALL_DIR/.docker/stack.env"
+DB_USER_BEFORE=""
+DB_PASS_BEFORE=""
+if [ -f "$STACK_ENV" ]; then
+  DB_USER_BEFORE="$(grep -E '^\s*GETFY_DB_USERNAME\s*=' "$STACK_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d ' \r\n\"' || true)"
+  DB_PASS_BEFORE="$(grep -E '^\s*GETFY_DB_PASSWORD\s*=' "$STACK_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d ' \r\n\"' || true)"
+fi
+
+set +e
 $SUDO env GETFY_COMPOSE_FILES="$COMPOSE_FILES" GETFY_APP_ENV=production GETFY_APP_DEBUG=false \
   GETFY_SKIP_DOCKER_BUILD="${GETFY_SKIP_DOCKER_BUILD:-0}" \
   sh docker/up.sh
+UP_RC=$?
+set -e
 
-# Migrate dentro do container app (não quebra se falhar pontualmente).
+if [ -f "$STACK_ENV" ] && [ -n "$DB_PASS_BEFORE" ]; then
+  DB_PASS_AFTER="$(grep -E '^\s*GETFY_DB_PASSWORD\s*=' "$STACK_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d ' \r\n\"' || true)"
+  if [ -n "$DB_PASS_AFTER" ] && [ "$DB_PASS_AFTER" != "$DB_PASS_BEFORE" ]; then
+    echo "AVISO: GETFY_DB_PASSWORD em .docker/stack.env mudou durante o up — restaurando." >&2
+    $SUDO sed -i "s|^GETFY_DB_USERNAME=.*|GETFY_DB_USERNAME=${DB_USER_BEFORE}|" "$STACK_ENV"
+    $SUDO sed -i "s|^GETFY_DB_PASSWORD=.*|GETFY_DB_PASSWORD=${DB_PASS_BEFORE}|" "$STACK_ENV"
+    $SUDO env GETFY_COMPOSE_FILES="$COMPOSE_FILES" GETFY_APP_ENV=production GETFY_APP_DEBUG=false \
+      GETFY_SKIP_DOCKER_BUILD=1 \
+      sh docker/up.sh || true
+  fi
+fi
+
 COMPOSE_EXEC_ARGS=""
 OLD_IFS="$IFS"
 IFS=' '
@@ -280,7 +304,12 @@ for f in $COMPOSE_FILES; do
 done
 IFS="$OLD_IFS"
 
-STACK_ENV="$INSTALL_DIR/.docker/stack.env"
+PROJECT_NAME="getfy"
+if [ -f "$STACK_ENV" ]; then
+  PROJECT_NAME="$(grep -E '^\s*GETFY_COMPOSE_PROJECT_NAME\s*=' "$STACK_ENV" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d ' \r\n\"' || true)"
+  [ -z "$PROJECT_NAME" ] && PROJECT_NAME="getfy"
+fi
+
 COMPOSE_ENV_ARGS=""
 if [ -f "$STACK_ENV" ]; then
   COMPOSE_ENV_ARGS="--env-file $STACK_ENV"
@@ -289,17 +318,29 @@ if [ -f "$INSTALL_DIR/.env" ]; then
   COMPOSE_ENV_ARGS="$COMPOSE_ENV_ARGS --env-file $INSTALL_DIR/.env"
 fi
 
+# shellcheck disable=SC2086
+dc() { $SUDO docker compose -p "$PROJECT_NAME" $COMPOSE_EXEC_ARGS $COMPOSE_ENV_ARGS "$@"; }
+
+if [ "$UP_RC" -ne 0 ]; then
+  echo "" >&2
+  echo "=== FALHA ao subir a stack (exit ${UP_RC}) — logs do app ===" >&2
+  dc logs app --tail 80 2>&1 || true
+  echo "" >&2
+  echo "Diagnóstico rápido:" >&2
+  echo "  cd ${INSTALL_DIR}" >&2
+  echo "  docker compose -p ${PROJECT_NAME} -f ${COMPOSE_FILES} --env-file .docker/stack.env ps" >&2
+  echo "  docker compose -p ${PROJECT_NAME} -f ${COMPOSE_FILES} --env-file .docker/stack.env logs app --tail 100" >&2
+  echo "Se aparecer 'Banco indisponível', as credenciais do Postgres no stack.env não batem com o volume." >&2
+  exit "$UP_RC"
+fi
+
 echo ""
 echo "=== Migrações ==="
-# shellcheck disable=SC2086
-$SUDO docker compose -p getfy $COMPOSE_EXEC_ARGS $COMPOSE_ENV_ARGS exec -T app php artisan migrate --force 2>/dev/null \
-  || $SUDO docker compose $COMPOSE_EXEC_ARGS $COMPOSE_ENV_ARGS exec -T app php artisan migrate --force 2>/dev/null \
+dc exec -T app php artisan migrate --force 2>/dev/null \
   || echo "Aviso: migrate não executou (verifique o container app)." >&2
 
-# shellcheck disable=SC2086
-$SUDO docker compose -p getfy $COMPOSE_EXEC_ARGS $COMPOSE_ENV_ARGS exec -T app php artisan config:clear 2>/dev/null || true
-# shellcheck disable=SC2086
-$SUDO docker compose -p getfy $COMPOSE_EXEC_ARGS $COMPOSE_ENV_ARGS exec -T app php artisan pwa:ensure-vapid 2>/dev/null || true
+dc exec -T app php artisan config:clear 2>/dev/null || true
+dc exec -T app php artisan pwa:ensure-vapid 2>/dev/null || true
 
 if [ -f docker/verify-workers.sh ]; then
   echo ""

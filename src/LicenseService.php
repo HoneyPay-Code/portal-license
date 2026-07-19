@@ -163,6 +163,76 @@ final class LicenseService
         return $stmt->fetchAll() ?: [];
     }
 
+    /**
+     * Admin: altera o domínio vinculado a uma ativação (ex. IP → hostname real).
+     *
+     * @throws RuntimeException
+     */
+    public function adminSetActivationDomain(int $licenseId, int $activationId, string $domain): void
+    {
+        $domain = DomainHelper::normalize($domain);
+        if ($domain === '' || (! DomainHelper::isPublicHostname($domain) && ! DomainHelper::isProvisional($domain))) {
+            throw new RuntimeException('Domínio inválido. Use um hostname (ex.: loja.seudominio.com), não um valor vazio.');
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM activations WHERE id = :id AND license_id = :license_id LIMIT 1'
+        );
+        $stmt->execute(['id' => $activationId, 'license_id' => $licenseId]);
+        $row = $stmt->fetch();
+        if (! $row) {
+            throw new RuntimeException('Ativação não encontrada nesta licença.');
+        }
+
+        $isProvisional = DomainHelper::isProvisional($domain);
+        $now = gmdate('c');
+        if ($isProvisional) {
+            $upd = $this->pdo->prepare(
+                'UPDATE activations
+                 SET domain = :domain, is_localhost = 1, last_seen_at = :last_seen_at
+                 WHERE id = :id AND license_id = :license_id'
+            );
+            $upd->execute([
+                'domain' => $domain,
+                'last_seen_at' => $now,
+                'id' => $activationId,
+                'license_id' => $licenseId,
+            ]);
+        } else {
+            $upd = $this->pdo->prepare(
+                'UPDATE activations
+                 SET domain = :domain,
+                     is_localhost = 0,
+                     bound_at = COALESCE(bound_at, :bound_at),
+                     last_seen_at = :last_seen_at
+                 WHERE id = :id AND license_id = :license_id'
+            );
+            $upd->execute([
+                'domain' => $domain,
+                'bound_at' => $now,
+                'last_seen_at' => $now,
+                'id' => $activationId,
+                'license_id' => $licenseId,
+            ]);
+        }
+    }
+
+    /**
+     * Admin: remove ativação (libera o slot para religar noutro domínio/install).
+     *
+     * @throws RuntimeException
+     */
+    public function adminDeleteActivation(int $licenseId, int $activationId): void
+    {
+        $stmt = $this->pdo->prepare(
+            'DELETE FROM activations WHERE id = :id AND license_id = :license_id'
+        );
+        $stmt->execute(['id' => $activationId, 'license_id' => $licenseId]);
+        if ($stmt->rowCount() < 1) {
+            throw new RuntimeException('Ativação não encontrada.');
+        }
+    }
+
     public function createLicense(
         int $maxActivations = 1,
         ?string $note = null,

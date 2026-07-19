@@ -692,12 +692,37 @@ if (str_starts_with($path, '/admin')) {
             echo 'Não encontrado';
             exit;
         }
+
+        if ($method === 'POST') {
+            require_csrf();
+            $action = (string) ($_POST['action'] ?? '');
+            $activationId = (int) ($_POST['activation_id'] ?? 0);
+            try {
+                if ($action === 'set_activation_domain') {
+                    $licenses->adminSetActivationDomain($id, $activationId, (string) ($_POST['domain'] ?? ''));
+                    $_SESSION['flash'] = 'Domínio da ativação atualizado.';
+                } elseif ($action === 'delete_activation') {
+                    $licenses->adminDeleteActivation($id, $activationId);
+                    $_SESSION['flash'] = 'Ativação removida.';
+                } else {
+                    $_SESSION['flash_error'] = 'Ação inválida.';
+                }
+            } catch (Throwable $e) {
+                $_SESSION['flash_error'] = $e->getMessage();
+            }
+            redirect('/admin/licenses/'.$id);
+        }
+
         render('admin/license_show', [
             'appName' => $appName,
             'title' => 'Licença',
             'license' => $license,
             'activations' => $licenses->listActivations($id),
+            'csrf' => Security::csrfToken(),
+            'flash' => $_SESSION['flash'] ?? null,
+            'error' => $_SESSION['flash_error'] ?? null,
         ], 'admin');
+        unset($_SESSION['flash'], $_SESSION['flash_error']);
         exit;
     }
 

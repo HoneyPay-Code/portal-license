@@ -8,9 +8,9 @@
     <h2 style="margin-top:0">Como funciona a licença</h2>
     <p class="muted" style="margin-bottom:0">
         O <strong>cliente</strong> e a <strong>chave</strong> nascem no pedido pago (ou no admin).
-        O <strong>domínio de produção</strong> não é digitado pelo cliente: é vinculado automaticamente na
-        <strong>primeira ativação real</strong> quando o gateway envia o host de <code>APP_URL</code> + <code>install_id</code>.
-        Localhost / <code>*.local</code> / <code>*.test</code> não consomem o slot. Uma chave = um domínio de produção.
+        O <strong>domínio de produção</strong> vincula na primeira ativação real (<code>APP_URL</code> + <code>install_id</code>).
+        Localhost / IP / <code>*.local</code> / <code>*.test</code> são provisionais e podem ser corrigidos.
+        No detalhe da licença o admin pode <strong>alterar o domínio</strong> ou remover a ativação.
     </p>
 </div>
 <div class="grid grid-2">

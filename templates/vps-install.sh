@@ -71,6 +71,38 @@ fi
 echo "Chave recebida. Continuando…"
 echo ""
 
+# Domínio público (não use o IP da VPS — a licença vincula neste hostname).
+DOMAIN="${GETFY_DOMAIN:-}"
+if [ -z "$DOMAIN" ]; then
+  if [ -r /dev/tty ]; then
+    printf "Domínio público (ex.: loja.seudominio.com): " > /dev/tty
+    # shellcheck disable=SC2162
+    read -r DOMAIN < /dev/tty
+  else
+    echo "Não foi possível ler o domínio (sem /dev/tty)." >&2
+    echo "Defina GETFY_DOMAIN=loja.seudominio.com antes do comando." >&2
+    exit 1
+  fi
+fi
+DOMAIN="$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]' | tr -d '\r\n' | sed 's|^https\?://||; s|/.*||; s|:.*||; s/^[[:space:]]*//;s/[[:space:]]*$//')"
+if [ -z "$DOMAIN" ]; then
+  echo "Domínio obrigatório." >&2
+  exit 1
+fi
+if printf '%s' "$DOMAIN" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "Não use o IP. Informe o hostname (ex.: loja.seudominio.com)." >&2
+  exit 1
+fi
+if ! printf '%s' "$DOMAIN" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'; then
+  echo "Domínio inválido: $DOMAIN" >&2
+  exit 1
+fi
+
+APP_PUBLIC_URL="${GETFY_APP_URL:-https://${DOMAIN}}"
+echo "Domínio: ${DOMAIN}"
+echo "APP_URL: ${APP_PUBLIC_URL}"
+echo ""
+
 $SUDO apt-get update -y
 $SUDO apt-get install -y ca-certificates curl unzip
 
@@ -180,8 +212,11 @@ $SUDO mkdir -p "$INSTALL_DIR/.docker"
 {
   echo "LICENSE_KEY=${LICENSE_KEY}"
   echo "LICENSE_API_URL=${PORTAL_URL}"
+  echo "GETFY_DOMAIN=${DOMAIN}"
+  echo "GETFY_APP_URL=${APP_PUBLIC_URL}"
 } | $SUDO tee "$INSTALL_DIR/.docker/install-license.env" >/dev/null
-$SUDO chmod 600 "$INSTALL_DIR/.docker/install-license.env"
+$SUDO cp -f "$INSTALL_DIR/.docker/install-license.env" "$INSTALL_DIR/.install-license.env"
+$SUDO chmod 600 "$INSTALL_DIR/.docker/install-license.env" "$INSTALL_DIR/.install-license.env"
 
 echo ""
 echo "=== Executando install-caddy.sh (Docker + Caddy) ==="
@@ -193,12 +228,15 @@ $SUDO env \
   GETFY_HTTP_PORT="$HTTP_PORT" \
   GETFY_HTTPS_PORT="$HTTPS_PORT" \
   GETFY_SWAP_MODE="$SWAP_MODE" \
-  GETFY_APP_URL="${GETFY_APP_URL:-}" \
-  GETFY_WEBHOOK_PUBLIC_URL="${GETFY_WEBHOOK_PUBLIC_URL:-}" \
+  GETFY_APP_URL="${APP_PUBLIC_URL}" \
+  GETFY_WEBHOOK_PUBLIC_URL="${GETFY_WEBHOOK_PUBLIC_URL:-$APP_PUBLIC_URL}" \
+  GETFY_DOMAIN="${DOMAIN}" \
   GETFY_COMPOSE_FILES="docker-compose.caddy.yml" \
   bash ./install-caddy.sh
 
 echo ""
 echo "Instalação com Caddy concluída."
-echo "Abra /docker-setup no navegador (domínio + licença)."
+echo "Aponte o DNS de ${DOMAIN} para este servidor e abra:"
+echo "  ${APP_PUBLIC_URL}/docker-setup"
+echo "(use o domínio, não o IP — a licença vincula ao hostname)."
 echo "TLS: Let's Encrypt no domínio (direto / Flexible); Origin Cert em .docker/certs/ para Full Strict."

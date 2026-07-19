@@ -26,7 +26,8 @@ final class LicenseService
     public function activate(string $licenseKey, string $domain, string $installId, ?string $appVersion, ?string $ip): array
     {
         $domain = DomainHelper::normalize($domain);
-        $isLocal = DomainHelper::isLocalhost($domain);
+        $isProvisional = DomainHelper::isProvisional($domain);
+        $isLocal = $isProvisional; // legado nos payloads assinados (is_localhost)
         $license = $this->findLicense($licenseKey);
         if (! $license) {
             return $this->signed(false, false, $domain, null, $installId, false, $isLocal);
@@ -42,17 +43,18 @@ final class LicenseService
 
         $existing = $this->findActivationByInstall((int) $license['id'], $installId);
         if ($existing) {
-            // Same install may refresh domain only if both are localhost or domain matches.
-            $prevLocal = ! empty($existing['is_localhost']);
-            if (! $isLocal && ! $prevLocal && DomainHelper::normalize((string) $existing['domain']) !== $domain) {
+            $prevDomain = DomainHelper::normalize((string) $existing['domain']);
+            $prevProvisional = ! empty($existing['is_localhost']) || DomainHelper::isProvisional($prevDomain);
+            // Mesmo install: permite domínio igual, ou upgrade provisional/IP → hostname real.
+            if (! $isProvisional && ! $prevProvisional && $prevDomain !== $domain) {
                 return $this->signed(false, false, $domain, $license['expires_at'] ?? null, $installId, true, false);
             }
-            $this->touchActivation((int) $existing['id'], $domain, $isLocal, $appVersion, $ip);
+            $this->touchActivation((int) $existing['id'], $domain, $isProvisional, $appVersion, $ip);
 
-            return $this->signed(true, false, $domain, $license['expires_at'] ?? null, $installId, ! $isLocal, $isLocal);
+            return $this->signed(true, false, $domain, $license['expires_at'] ?? null, $installId, ! $isProvisional, $isLocal);
         }
 
-        if ($isLocal) {
+        if ($isProvisional) {
             $this->insertActivation((int) $license['id'], $domain, $installId, true, $appVersion, $ip);
 
             return $this->signed(true, false, $domain, $license['expires_at'] ?? null, $installId, false, true);
@@ -60,8 +62,13 @@ final class LicenseService
 
         $prod = $this->findProductionActivation((int) $license['id']);
         if ($prod) {
-            // Already bound to another install/domain
-            return $this->signed(false, false, $domain, $license['expires_at'] ?? null, (string) $prod['install_id'], true, false);
+            $prodDomain = DomainHelper::normalize((string) ($prod['domain'] ?? ''));
+            // Produção presa em IP (erro de setup): permite substituir pelo domínio real no mesmo ou novo install.
+            if (DomainHelper::isIpHost($prodDomain) || ! empty($prod['is_localhost'])) {
+                $this->deleteActivation((int) $prod['id']);
+            } else {
+                return $this->signed(false, false, $domain, $license['expires_at'] ?? null, (string) $prod['install_id'], true, false);
+            }
         }
 
         $this->insertActivation((int) $license['id'], $domain, $installId, false, $appVersion, $ip, true);
@@ -75,7 +82,8 @@ final class LicenseService
     public function heartbeat(string $licenseKey, string $domain, string $installId, ?string $appVersion, ?string $ip): array
     {
         $domain = DomainHelper::normalize($domain);
-        $isLocal = DomainHelper::isLocalhost($domain);
+        $isProvisional = DomainHelper::isProvisional($domain);
+        $isLocal = $isProvisional;
         $license = $this->findLicense($licenseKey);
         if (! $license) {
             return $this->signed(false, false, $domain, null, $installId, false, $isLocal);
@@ -94,14 +102,16 @@ final class LicenseService
             return $this->signed(false, false, $domain, $license['expires_at'] ?? null, $installId, false, $isLocal);
         }
 
-        $prevLocal = ! empty($existing['is_localhost']);
-        if (! $isLocal && ! $prevLocal && DomainHelper::normalize((string) $existing['domain']) !== $domain) {
+        $prevDomain = DomainHelper::normalize((string) $existing['domain']);
+        $prevProvisional = ! empty($existing['is_localhost']) || DomainHelper::isProvisional($prevDomain);
+        if (! $isProvisional && ! $prevProvisional && $prevDomain !== $domain) {
             return $this->signed(false, false, $domain, $license['expires_at'] ?? null, $installId, true, false);
         }
 
-        $this->touchActivation((int) $existing['id'], $domain, $isLocal || $prevLocal, $appVersion, $ip);
+        // Heartbeat: se ainda em IP e APP enviou hostname, atualiza (upgrade).
+        $this->touchActivation((int) $existing['id'], $domain, $isProvisional, $appVersion, $ip);
 
-        return $this->signed(true, false, $domain, $license['expires_at'] ?? null, $installId, ! ($isLocal || $prevLocal), $isLocal || $prevLocal);
+        return $this->signed(true, false, $domain, $license['expires_at'] ?? null, $installId, ! $isProvisional, $isProvisional);
     }
 
     /** @return array<string, mixed>|null */
@@ -268,6 +278,12 @@ final class LicenseService
             'last_seen_at' => gmdate('c'),
             'id' => $id,
         ]);
+    }
+
+    private function deleteActivation(int $id): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM activations WHERE id = :id');
+        $stmt->execute(['id' => $id]);
     }
 
     private function isExpired(?string $expiresAt): bool

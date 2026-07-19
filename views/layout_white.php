@@ -59,6 +59,7 @@ $nav = $nav ?? 'guest';
             padding: 16px 16px calc(88px + var(--safe-bottom));
             overflow-x: clip;
         }
+        .shell.shell-wide { max-width: 1280px; }
         .topbar {
             display: flex; align-items: center; justify-content: space-between; gap: 12px;
             margin-bottom: 20px; padding: 12px 14px; background: var(--surface);
@@ -298,6 +299,7 @@ $nav = $nav ?? 'guest';
             <a href="/app/install" class="<?= ($active ?? '') === 'install' ? 'active' : '' ?>">Instalação</a>
             <a href="/app/products" class="<?= ($active ?? '') === 'products' ? 'active' : '' ?>">Produtos</a>
             <a href="/app/docs" class="<?= ($active ?? '') === 'docs' ? 'active' : '' ?>">Documentação</a>
+            <a href="/app/account" class="<?= ($active ?? '') === 'account' ? 'active' : '' ?>">Conta</a>
             <form method="post" action="/logout" style="display:inline;margin:0">
                 <input type="hidden" name="_csrf" value="<?= htmlspecialchars(\LicenseApi\Security::csrfToken()) ?>">
                 <button type="submit" class="btn btn-secondary btn-sm" style="border-radius:999px;padding:8px 12px;min-height:0">Sair</button>
@@ -310,11 +312,11 @@ $nav = $nav ?? 'guest';
     <a href="/app" class="<?= ($active ?? '') === 'dashboard' ? 'active' : '' ?>">Início</a>
     <a href="/app/license" class="<?= ($active ?? '') === 'license' ? 'active' : '' ?>">Licença</a>
     <a href="/app/install" class="<?= ($active ?? '') === 'install' ? 'active' : '' ?>">Instalar</a>
-    <a href="/app/products" class="<?= ($active ?? '') === 'products' ? 'active' : '' ?>">Produtos</a>
     <a href="/app/docs" class="<?= ($active ?? '') === 'docs' ? 'active' : '' ?>">Docs</a>
+    <a href="/app/account" class="<?= ($active ?? '') === 'account' ? 'active' : '' ?>">Conta</a>
 </nav>
 <?php elseif ($nav === 'admin'): ?>
-<div class="shell">
+<div class="shell<?= ! empty($wide) ? ' shell-wide' : '' ?>">
     <div class="topbar">
         <a class="brand" href="/admin">
             <img class="brand-logo" src="/assets/logo.png" alt="<?= htmlspecialchars($appName) ?>" width="160" height="40">
@@ -325,11 +327,13 @@ $nav = $nav ?? 'guest';
         <div class="nav">
             <a href="/admin">Licenças</a>
             <a href="/admin/releases">Releases</a>
+            <a href="/admin/products">Produtos</a>
             <a href="/admin/customers">Clientes</a>
             <a href="/admin/orders">Pedidos</a>
-            <a href="/admin/lessons">Aulas</a>
+            <a href="/admin/docs">Docs</a>
             <a href="/admin/webhooks">Webhooks entrada</a>
             <a href="/admin/outbound-webhooks">Webhooks saída</a>
+            <a href="/admin/account">Conta</a>
             <a href="/admin/settings">Configurações</a>
             <form method="post" action="/logout" style="display:inline;margin:0">
                 <input type="hidden" name="_csrf" value="<?= htmlspecialchars(\LicenseApi\Security::csrfToken()) ?>">

@@ -63,6 +63,7 @@ final class Database
             foreach ([
                 'customer_note', 'body_markdown', 'raw_json', 'payload_json', 'process_result', 'checkout_url',
                 'events', 'request_body', 'response_body', 'url', 'value', 'bearer_token', 'totp_secret',
+                'description',
             ] as $keep) {
                 $schema = str_replace("{$keep} DATETIME NULL", "{$keep} TEXT NULL", $schema);
                 $schema = str_replace("{$keep} DATETIME NOT NULL", "{$keep} TEXT NOT NULL", $schema);
@@ -83,6 +84,17 @@ final class Database
         self::ensureColumn($pdo, 'admins', 'totp_secret', 'TEXT NULL');
         self::ensureColumn($pdo, 'admins', 'totp_enabled', 'INTEGER NOT NULL DEFAULT 0');
         self::ensureColumn($pdo, 'admins', 'totp_confirmed_at', 'TEXT NULL');
+        self::ensureColumn($pdo, 'products', 'kind', "VARCHAR(32) NOT NULL DEFAULT 'plugin'");
+        self::ensureColumn($pdo, 'products', 'description', 'TEXT NULL');
+        self::ensureColumn($pdo, 'products', 'price', 'REAL NULL');
+        self::ensureColumn($pdo, 'products', 'currency', 'VARCHAR(8) NULL');
+        self::ensureColumn($pdo, 'products', 'image_path', 'VARCHAR(512) NULL');
+        self::ensureColumn($pdo, 'products', 'plugin_zip_path', 'VARCHAR(512) NULL');
+        self::ensureColumn($pdo, 'products', 'plugin_zip_filename', 'VARCHAR(255) NULL');
+        self::ensureColumn($pdo, 'products', 'plugin_zip_sha256', 'VARCHAR(128) NULL');
+        self::ensureColumn($pdo, 'products', 'plugin_zip_size', 'INTEGER NULL');
+        self::ensureColumn($pdo, 'products', 'is_published', 'INTEGER NOT NULL DEFAULT 1');
+        self::ensureColumn($pdo, 'products', 'sort_order', 'INTEGER NOT NULL DEFAULT 0');
     }
 
     private static function ensureColumn(PDO $pdo, string $table, string $column, string $definition): void

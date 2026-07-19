@@ -169,4 +169,24 @@ final class Security
             exit;
         }
     }
+
+    /**
+     * @return string|null Error message, or null if ok
+     */
+    public static function validatePassword(string $password, int $minLength = 8, bool $requireMixed = false): ?string
+    {
+        if (strlen($password) < $minLength) {
+            return "A senha deve ter no mínimo {$minLength} caracteres.";
+        }
+        if (preg_match('/\s/u', $password)) {
+            return 'A senha não pode conter espaços.';
+        }
+        if ($requireMixed) {
+            if (! preg_match('/[A-Za-z]/u', $password) || ! preg_match('/[0-9]/u', $password)) {
+                return 'A senha deve ter letras e números.';
+            }
+        }
+
+        return null;
+    }
 }

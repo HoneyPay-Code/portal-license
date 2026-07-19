@@ -5,6 +5,8 @@
 !/storage/.gitignore
 !/storage/releases/
 !/storage/releases/.gitignore
+!/storage/products/
+!/storage/products/**/.gitignore
 *.sqlite
 *.sqlite3
 storage/rate/

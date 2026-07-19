@@ -8,6 +8,8 @@ use PDO;
 
 final class LessonService
 {
+    public const SEED_VERSION = '2026-07-19b';
+
     public function __construct(private PDO $pdo) {}
 
     /** @return list<array<string, mixed>> */
@@ -23,11 +25,14 @@ final class LessonService
             $sql .= ' ORDER BY sort_order ASC, id ASC';
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute(['sid' => (int) $section['id']]);
-            $section['lessons'] = $stmt->fetchAll() ?: [];
+            $lessons = $stmt->fetchAll() ?: [];
+            if ($publishedOnly && $lessons === []) {
+                continue;
+            }
+            $section['lessons'] = $lessons;
             $out[] = $section;
         }
 
-        // Orphan lessons
         $sql = 'SELECT * FROM lessons WHERE section_id IS NULL';
         if ($publishedOnly) {
             $sql .= ' AND published = 1';
@@ -46,11 +51,81 @@ final class LessonService
         return $out;
     }
 
+    /**
+     * Flat list of published lessons in reading order.
+     *
+     * @return list<array{slug:string,title:string}>
+     */
+    public function flatPublishedPages(): array
+    {
+        $flat = [];
+        foreach ($this->sectionsWithLessons(true) as $section) {
+            foreach (($section['lessons'] ?? []) as $lesson) {
+                $flat[] = [
+                    'slug' => (string) $lesson['slug'],
+                    'title' => (string) $lesson['title'],
+                ];
+            }
+        }
+
+        return $flat;
+    }
+
+    /**
+     * @return array{prev: ?array{slug:string,title:string}, next: ?array{slug:string,title:string}}
+     */
+    public function neighbors(string $slug): array
+    {
+        $pages = $this->flatPublishedPages();
+        $prev = null;
+        $next = null;
+        foreach ($pages as $i => $page) {
+            if ($page['slug'] !== $slug) {
+                continue;
+            }
+            $prev = $i > 0 ? $pages[$i - 1] : null;
+            $next = isset($pages[$i + 1]) ? $pages[$i + 1] : null;
+            break;
+        }
+
+        return ['prev' => $prev, 'next' => $next];
+    }
+
     /** @return array<string, mixed>|null */
     public function findBySlug(string $slug): ?array
     {
         $stmt = $this->pdo->prepare('SELECT * FROM lessons WHERE slug = :s LIMIT 1');
         $stmt->execute(['s' => $slug]);
+        $row = $stmt->fetch();
+
+        return $row ?: null;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findById(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM lessons WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $id]);
+        $row = $stmt->fetch();
+
+        return $row ?: null;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findSectionBySlug(string $slug): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM lesson_sections WHERE slug = :s LIMIT 1');
+        $stmt->execute(['s' => $slug]);
+        $row = $stmt->fetch();
+
+        return $row ?: null;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findSectionById(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM lesson_sections WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $id]);
         $row = $stmt->fetch();
 
         return $row ?: null;
@@ -85,6 +160,19 @@ final class LessonService
             'INSERT INTO lesson_sections (title, slug, sort_order, created_at) VALUES (:t, :s, :o, :c)'
         );
         $stmt->execute(['t' => $title, 's' => $slug, 'o' => $sortOrder, 'c' => $now]);
+    }
+
+    public function upsertSectionBySlug(string $title, string $slug, int $sortOrder): int
+    {
+        $existing = $this->findSectionBySlug($slug);
+        if ($existing) {
+            $this->upsertSection((int) $existing['id'], $title, $slug, $sortOrder);
+
+            return (int) $existing['id'];
+        }
+        $this->upsertSection(null, $title, $slug, $sortOrder);
+
+        return (int) $this->pdo->lastInsertId();
     }
 
     public function upsertLesson(
@@ -134,66 +222,103 @@ final class LessonService
         ]);
     }
 
+    public function upsertLessonBySlug(
+        ?int $sectionId,
+        string $title,
+        string $slug,
+        string $body,
+        int $sortOrder,
+        bool $published = true,
+        bool $docsPublic = false,
+    ): void {
+        $existing = $this->findBySlug($slug);
+        $this->upsertLesson(
+            $existing ? (int) $existing['id'] : null,
+            $sectionId,
+            $title,
+            $slug,
+            $body,
+            $sortOrder,
+            $published,
+            $docsPublic
+        );
+    }
+
     public function deleteLesson(int $id): void
     {
         $stmt = $this->pdo->prepare('DELETE FROM lessons WHERE id = :id');
         $stmt->execute(['id' => $id]);
     }
 
-    public function seedDefaults(): void
+    public function sectionLessonCount(int $sectionId): int
     {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM lessons WHERE section_id = :id');
+        $stmt->execute(['id' => $sectionId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    public function deleteSection(int $id): bool
+    {
+        if ($this->sectionLessonCount($id) > 0) {
+            return false;
+        }
+        $stmt = $this->pdo->prepare('DELETE FROM lesson_sections WHERE id = :id');
+        $stmt->execute(['id' => $id]);
+
+        return true;
+    }
+
+    public function seedDefaults(bool $force = false): void
+    {
+        $settings = new SettingsStore($this->pdo);
+        $current = $settings->get('docs_seed_version');
         $count = (int) $this->pdo->query('SELECT COUNT(*) FROM lessons')->fetchColumn();
-        if ($count > 0) {
+
+        if (! $force && $current === self::SEED_VERSION && $count > 0) {
             return;
         }
 
-        $this->upsertSection(null, 'Instalação', 'instalacao', 1);
-        $sectionId = (int) $this->pdo->lastInsertId();
+        // First install with empty DB and no force: still seed.
+        // Old version or force: upsert official slugs without deleting custom pages.
+        $this->applySeedFromFile($force || $current !== self::SEED_VERSION || $count === 0);
+        $settings->set('docs_seed_version', self::SEED_VERSION);
+    }
 
-        $lessons = [
-            [
-                'slug' => 'requisitos',
-                'title' => 'Requisitos',
-                'order' => 1,
-                'body' => "# Requisitos\n\n- PHP **8.3+**\n- MySQL (shared) ou Postgres (Docker)\n- Extensões: pdo, mbstring, openssl, curl, json\n- Permissão de escrita em `storage/` e `.env`\n- Cron a cada minuto apontando para `/cron?token=...`\n",
-            ],
-            [
-                'slug' => 'install-shared',
-                'title' => 'Instalação em hospedagem compartilhada',
-                'order' => 2,
-                'body' => "# Shared hosting (MySQL)\n\n1. Faça upload do pacote com `vendor/` e `public/build`\n2. Document root = pasta `public/`\n3. Abra `/install`\n4. Valide a **licença**, configure MySQL e a URL\n5. Configure o cron HTTP gerado no final\n6. Crie o primeiro admin em `/criar-admin`\n",
-            ],
-            [
-                'slug' => 'install-docker',
-                'title' => 'Instalação via Docker (VPS)',
-                'order' => 3,
-                'body' => "# Docker / VPS\n\n```bash\nsudo bash install.sh\n```\n\nAbra `http://IP:PORTA/docker-setup`, informe domínio + chave de licença e depois `/criar-admin`.\n",
-            ],
-            [
-                'slug' => 'licenca',
-                'title' => 'Como usar sua licença',
-                'order' => 4,
-                'body' => "# Licença\n\n- Cada chave vale para **1 instalação de produção**\n- `localhost` / `127.0.0.1` / `*.local` podem ser usados livremente para testes\n- Não compartilhe a chave — reuso em outro domínio será bloqueado\n",
-            ],
-            [
-                'slug' => 'cron',
-                'title' => 'Cron e filas',
-                'order' => 5,
-                'body' => "# Cron\n\nEm shared hosting, agende a cada minuto:\n\n`https://seudominio.com/cron?token=SEU_CRON_SECRET`\n\nIsso processa reconciliação, heartbeat da licença e a fila `database`.\n",
-            ],
-        ];
-
-        foreach ($lessons as $lesson) {
-            $this->upsertLesson(
-                null,
-                $sectionId,
-                $lesson['title'],
-                $lesson['slug'],
-                $lesson['body'],
-                $lesson['order'],
-                true,
-                false
-            );
+    public function applySeedFromFile(bool $run = true): int
+    {
+        if (! $run) {
+            return 0;
         }
+
+        $path = dirname(__DIR__).'/content/docs-seed.php';
+        if (! is_file($path)) {
+            return 0;
+        }
+
+        /** @var list<array{title:string,slug:string,pages:list<array{title:string,slug:string,body:string}>}> $seed */
+        $seed = require $path;
+        $pages = 0;
+        foreach ($seed as $sectionOrder => $section) {
+            $sectionId = $this->upsertSectionBySlug(
+                (string) $section['title'],
+                (string) $section['slug'],
+                $sectionOrder + 1
+            );
+            foreach (($section['pages'] ?? []) as $pageOrder => $page) {
+                $this->upsertLessonBySlug(
+                    $sectionId,
+                    (string) $page['title'],
+                    (string) $page['slug'],
+                    (string) $page['body'],
+                    $pageOrder + 1,
+                    true,
+                    false
+                );
+                $pages++;
+            }
+        }
+
+        return $pages;
     }
 }

@@ -9,6 +9,7 @@ extract($app);
 use LicenseApi\DomainHelper;
 use LicenseApi\Env;
 use LicenseApi\Markdown;
+use LicenseApi\ProductService;
 use LicenseApi\SafeUrl;
 use LicenseApi\Security;
 
@@ -32,7 +33,7 @@ function redirect(string $to): void
     exit;
 }
 
-function render(string $view, array $data = [], string $nav = 'guest'): void
+function render(string $view, array $data = [], string $nav = 'guest', string $layout = 'layout_white'): void
 {
     extract($data, EXTR_SKIP);
     ob_start();
@@ -41,7 +42,8 @@ function render(string $view, array $data = [], string $nav = 'guest'): void
     $appName = $data['appName'] ?? 'License Portal';
     $title = $data['title'] ?? '';
     $active = $data['active'] ?? '';
-    require dirname(__DIR__).'/views/layout_white.php';
+    $wide = ! empty($data['wide']);
+    require dirname(__DIR__).'/views/'.$layout.'.php';
 }
 
 function request_json(): array
@@ -363,6 +365,53 @@ if (str_starts_with($path, '/app')) {
         exit;
     }
 
+    if ($path === '/app/account') {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        if ($method === 'POST') {
+            require_csrf();
+            if (! Security::rateLimit('cust-account:'.$customerId.':'.$ip, 20, 600, $basePath)) {
+                $_SESSION['flash_error'] = 'Muitas tentativas. Aguarde alguns minutos.';
+                redirect('/app/account');
+            }
+            $action = (string) ($_POST['action'] ?? '');
+            if ($action === 'update_profile') {
+                $result = $customers->updateOwnProfile(
+                    $customerId,
+                    (string) ($_POST['name'] ?? ''),
+                    (string) ($_POST['phone'] ?? '')
+                );
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+            }
+            if ($action === 'update_password') {
+                $new = (string) ($_POST['new_password'] ?? '');
+                $confirm = (string) ($_POST['new_password_confirmation'] ?? '');
+                if ($new !== $confirm) {
+                    $_SESSION['flash_error'] = 'A confirmação da senha não confere.';
+                } else {
+                    $result = $customers->changeOwnPassword(
+                        $customerId,
+                        (string) ($_POST['current_password'] ?? ''),
+                        $new
+                    );
+                    $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+                }
+            }
+            redirect('/app/account');
+        }
+        $customer = $customers->findById($customerId) ?? $customer;
+        render('customer/account', [
+            'appName' => $appName,
+            'title' => 'Minha conta',
+            'active' => 'account',
+            'customer' => $customer,
+            'csrf' => Security::csrfToken(),
+            'flash' => $_SESSION['flash'] ?? null,
+            'error' => $_SESSION['flash_error'] ?? null,
+        ], 'customer');
+        unset($_SESSION['flash'], $_SESSION['flash_error']);
+        exit;
+    }
+
     if ($path === '/app/license') {
         if ($method === 'POST' && ($_POST['action'] ?? '') === 'clear_localhost') {
             require_csrf();
@@ -422,19 +471,68 @@ if (str_starts_with($path, '/app')) {
             'title' => 'Produtos',
             'active' => 'products',
             'entitlements' => $products->entitlementsForCustomer($customerId),
+            'catalog' => $products->catalogForCustomer($customerId),
         ], 'customer');
         exit;
     }
 
+    if (preg_match('#^/app/products/([a-z0-9\-]+)/image$#', $path, $m)) {
+        $product = $products->findBySlug($m[1]);
+        if (! $product) {
+            http_response_code(404);
+            exit;
+        }
+        $owned = $products->customerHasProduct($customerId, (int) $product['id']);
+        if (empty($product['is_published']) && ! $owned) {
+            http_response_code(404);
+            exit;
+        }
+        $products->streamImage($product);
+    }
+
+    if (preg_match('#^/app/products/([a-z0-9\-]+)/download$#', $path, $m)) {
+        $product = $products->findBySlug($m[1]);
+        if (! $product) {
+            http_response_code(404);
+            echo 'Produto não encontrado';
+            exit;
+        }
+        if (($product['kind'] ?? '') === ProductService::KIND_GATEWAY) {
+            redirect('/app/install');
+        }
+        if (! $products->customerHasProduct($customerId, (int) $product['id'])) {
+            http_response_code(403);
+            echo 'Compra necessária para baixar este plugin.';
+            exit;
+        }
+        if (empty($product['plugin_zip_path'])) {
+            http_response_code(404);
+            echo 'ZIP ainda não disponível.';
+            exit;
+        }
+        if (! Security::rateLimit('plugin-dl:'.$customerId.':'.(int) $product['id'], 30, 3600, $basePath)) {
+            http_response_code(429);
+            echo 'Muitos downloads. Tente novamente mais tarde.';
+            exit;
+        }
+        $products->streamPluginZip($product);
+    }
+
     if ($path === '/app/docs') {
         $hasAccess = $products->customerHasActiveEntitlement($customerId);
+        $sections = $hasAccess ? $lessons->sectionsWithLessons(true) : [];
+        $flat = $hasAccess ? $lessons->flatPublishedPages() : [];
         render('customer/docs_index', [
             'appName' => $appName,
             'title' => 'Documentação',
             'active' => 'docs',
-            'sections' => $hasAccess ? $lessons->sectionsWithLessons(true) : [],
+            'sections' => $sections,
             'hasAccess' => $hasAccess,
-        ], 'customer');
+            'activeSlug' => null,
+            'toc' => [],
+            'prev' => null,
+            'next' => $flat[0] ?? null,
+        ], 'customer', 'layout_docs');
         exit;
     }
 
@@ -449,14 +547,21 @@ if (str_starts_with($path, '/app')) {
         if (! $hasAccess && empty($lesson['docs_public'])) {
             redirect('/app/docs');
         }
+        $html = Markdown::toHtml((string) $lesson['body_markdown']);
+        $neighbors = $lessons->neighbors((string) $lesson['slug']);
         render('customer/docs_show', [
             'appName' => $appName,
             'title' => (string) $lesson['title'],
             'active' => 'docs',
             'lesson' => $lesson,
-            'html' => Markdown::toHtml((string) $lesson['body_markdown']),
+            'html' => $html,
             'sections' => $lessons->sectionsWithLessons(true),
-        ], 'customer');
+            'hasAccess' => true,
+            'activeSlug' => (string) $lesson['slug'],
+            'toc' => Markdown::extractToc($html),
+            'prev' => $neighbors['prev'],
+            'next' => $neighbors['next'],
+        ], 'customer', 'layout_docs');
         exit;
     }
 }
@@ -623,6 +728,81 @@ if (str_starts_with($path, '/admin')) {
             'title' => 'Webhooks entrada',
             'events' => $webhooks->listEvents(100),
         ], 'admin');
+        exit;
+    }
+
+    if ($path === '/admin/account') {
+        $adminId = (int) $auth->adminId();
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        if ($method === 'POST') {
+            require_csrf();
+            if (! Security::rateLimit('admin-account:'.$adminId.':'.$ip, 20, 600, $basePath)) {
+                $_SESSION['flash_error'] = 'Muitas tentativas. Aguarde alguns minutos.';
+                redirect('/admin/account');
+            }
+            $action = (string) ($_POST['action'] ?? '');
+            if ($action === 'update_email') {
+                $result = $auth->updateAdminEmail(
+                    $adminId,
+                    (string) ($_POST['email'] ?? ''),
+                    (string) ($_POST['current_password'] ?? '')
+                );
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+            }
+            if ($action === 'update_password') {
+                $new = (string) ($_POST['new_password'] ?? '');
+                $confirm = (string) ($_POST['new_password_confirmation'] ?? '');
+                if ($new !== $confirm) {
+                    $_SESSION['flash_error'] = 'A confirmação da senha não confere.';
+                } else {
+                    $result = $auth->updateAdminPassword(
+                        $adminId,
+                        (string) ($_POST['current_password'] ?? ''),
+                        $new
+                    );
+                    $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+                }
+            }
+            if ($action === 'create_admin') {
+                $pass = (string) ($_POST['password'] ?? '');
+                $confirm = (string) ($_POST['password_confirmation'] ?? '');
+                if ($pass !== $confirm) {
+                    $_SESSION['flash_error'] = 'A confirmação da senha inicial não confere.';
+                } else {
+                    $result = $auth->createAdmin(
+                        (string) ($_POST['email'] ?? ''),
+                        $pass,
+                        (string) ($_POST['current_password'] ?? ''),
+                        $adminId
+                    );
+                    $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+                }
+            }
+            if ($action === 'delete_admin') {
+                $result = $auth->deleteAdmin(
+                    (int) ($_POST['admin_id'] ?? 0),
+                    $adminId,
+                    (string) ($_POST['current_password'] ?? '')
+                );
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+            }
+            redirect('/admin/account');
+        }
+
+        $me = $auth->findAdminById($adminId);
+        render('admin/account', [
+            'appName' => $appName,
+            'title' => 'Minha conta',
+            'admin' => [
+                'id' => $adminId,
+                'email' => (string) ($me['email'] ?? $auth->adminEmail() ?? ''),
+            ],
+            'admins' => $auth->listAdmins(),
+            'csrf' => Security::csrfToken(),
+            'flash' => $_SESSION['flash'] ?? null,
+            'error' => $_SESSION['flash_error'] ?? null,
+        ], 'admin');
+        unset($_SESSION['flash'], $_SESSION['flash_error']);
         exit;
     }
 
@@ -800,6 +980,118 @@ if (str_starts_with($path, '/admin')) {
         exit;
     }
 
+    if (preg_match('#^/admin/products/image/(\d+)$#', $path, $im)) {
+        $product = $products->findById((int) $im[1]);
+        if (! $product) {
+            http_response_code(404);
+            exit;
+        }
+        $products->streamImage($product);
+    }
+
+    if ($path === '/admin/products') {
+        if ($method === 'POST') {
+            require_csrf();
+            $action = (string) ($_POST['action'] ?? '');
+            if ($action === 'create') {
+                $result = $products->create([
+                    'name' => (string) ($_POST['name'] ?? ''),
+                    'slug' => (string) ($_POST['slug'] ?? ''),
+                    'kind' => (string) ($_POST['kind'] ?? 'plugin'),
+                    'description' => (string) ($_POST['description'] ?? ''),
+                    'price' => ($_POST['price'] ?? '') !== '' ? (float) $_POST['price'] : null,
+                    'currency' => (string) ($_POST['currency'] ?? 'BRL'),
+                    'checkout_url' => (string) ($_POST['checkout_url'] ?? ''),
+                    'external_product_id' => (string) ($_POST['external_product_id'] ?? ''),
+                    'external_offer_id' => (string) ($_POST['external_offer_id'] ?? ''),
+                    'is_published' => ! empty($_POST['is_published']),
+                    'sort_order' => (int) ($_POST['sort_order'] ?? 100),
+                ]);
+                if ($result['ok'] && ! empty($result['product']['id'])) {
+                    $_SESSION['flash'] = $result['message'];
+                    redirect('/admin/products?edit='.(int) $result['product']['id']);
+                }
+                $_SESSION['flash_error'] = $result['message'];
+                redirect('/admin/products?new=1');
+            }
+            if ($action === 'update') {
+                $id = (int) ($_POST['id'] ?? 0);
+                $result = $products->update($id, [
+                    'name' => (string) ($_POST['name'] ?? ''),
+                    'slug' => (string) ($_POST['slug'] ?? ''),
+                    'kind' => (string) ($_POST['kind'] ?? 'plugin'),
+                    'description' => (string) ($_POST['description'] ?? ''),
+                    'price' => ($_POST['price'] ?? '') !== '' ? (float) $_POST['price'] : null,
+                    'currency' => (string) ($_POST['currency'] ?? 'BRL'),
+                    'checkout_url' => (string) ($_POST['checkout_url'] ?? ''),
+                    'external_product_id' => (string) ($_POST['external_product_id'] ?? ''),
+                    'external_offer_id' => (string) ($_POST['external_offer_id'] ?? ''),
+                    'is_published' => ! empty($_POST['is_published']),
+                    'sort_order' => (int) ($_POST['sort_order'] ?? 100),
+                ]);
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+                redirect('/admin/products?edit='.$id);
+            }
+            if ($action === 'delete') {
+                $result = $products->delete((int) ($_POST['id'] ?? 0));
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+                redirect('/admin/products');
+            }
+            if ($action === 'upload_image') {
+                $id = (int) ($_POST['id'] ?? 0);
+                $file = $_FILES['image'] ?? ['error' => UPLOAD_ERR_NO_FILE];
+                $result = $products->uploadImage($id, $file);
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+                redirect('/admin/products?edit='.$id);
+            }
+            if ($action === 'upload_zip') {
+                $id = (int) ($_POST['id'] ?? 0);
+                $file = $_FILES['zip'] ?? ['error' => UPLOAD_ERR_NO_FILE];
+                $result = $products->uploadPluginZip($id, $file);
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+                redirect('/admin/products?edit='.$id);
+            }
+            if ($action === 'clear_zip') {
+                $id = (int) ($_POST['id'] ?? 0);
+                $result = $products->clearPluginZip($id);
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+                redirect('/admin/products?edit='.$id);
+            }
+            redirect('/admin/products');
+        }
+
+        if (isset($_GET['edit']) || isset($_GET['new'])) {
+            $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
+            $product = $editId > 0 ? $products->findById($editId) : null;
+            if (isset($_GET['edit']) && ! $product) {
+                $_SESSION['flash_error'] = 'Produto não encontrado.';
+                redirect('/admin/products');
+            }
+            render('admin/product_edit', [
+                'appName' => $appName,
+                'title' => $product ? 'Editar produto' : 'Novo produto',
+                'product' => $product,
+                'isNew' => $product === null,
+                'csrf' => Security::csrfToken(),
+                'flash' => $_SESSION['flash'] ?? null,
+                'error' => $_SESSION['flash_error'] ?? null,
+            ], 'admin');
+            unset($_SESSION['flash'], $_SESSION['flash_error']);
+            exit;
+        }
+
+        render('admin/products', [
+            'appName' => $appName,
+            'title' => 'Produtos',
+            'products' => $products->listAll(),
+            'csrf' => Security::csrfToken(),
+            'flash' => $_SESSION['flash'] ?? null,
+            'error' => $_SESSION['flash_error'] ?? null,
+        ], 'admin');
+        unset($_SESSION['flash'], $_SESSION['flash_error']);
+        exit;
+    }
+
     if ($path === '/admin/releases') {
         if ($method === 'POST') {
             require_csrf();
@@ -844,41 +1136,93 @@ if (str_starts_with($path, '/admin')) {
     }
 
     if ($path === '/admin/lessons') {
+        redirect('/admin/docs');
+    }
+
+    if ($path === '/admin/docs/preview' && $method === 'POST') {
+        require_csrf();
+        json_response([
+            'html' => Markdown::toHtml((string) ($_POST['markdown'] ?? '')),
+        ]);
+    }
+
+    if ($path === '/admin/docs') {
         if ($method === 'POST') {
             require_csrf();
             $action = (string) ($_POST['action'] ?? '');
-            if ($action === 'save_section') {
-                $lessons->upsertSection(
-                    ($_POST['id'] ?? '') !== '' ? (int) $_POST['id'] : null,
-                    trim((string) ($_POST['title'] ?? '')),
-                    trim((string) ($_POST['slug'] ?? '')),
-                    (int) ($_POST['sort_order'] ?? 0)
-                );
-            }
             if ($action === 'save_lesson') {
+                $lessonId = ($_POST['id'] ?? '') !== '' ? (int) $_POST['id'] : null;
+                $slug = trim((string) ($_POST['slug'] ?? ''));
                 $lessons->upsertLesson(
-                    ($_POST['id'] ?? '') !== '' ? (int) $_POST['id'] : null,
+                    $lessonId,
                     ($_POST['section_id'] ?? '') !== '' ? (int) $_POST['section_id'] : null,
                     trim((string) ($_POST['title'] ?? '')),
-                    trim((string) ($_POST['slug'] ?? '')),
+                    $slug,
                     (string) ($_POST['body_markdown'] ?? ''),
                     (int) ($_POST['sort_order'] ?? 0),
                     ! empty($_POST['published']),
                     ! empty($_POST['docs_public'])
                 );
+                $_SESSION['flash'] = 'Página salva.';
+                if ($lessonId) {
+                    redirect('/admin/docs?edit_lesson='.$lessonId);
+                }
+                $created = $lessons->findBySlug($slug);
+                if ($created) {
+                    redirect('/admin/docs?edit_lesson='.(int) $created['id']);
+                }
+                redirect('/admin/docs');
+            }
+            if ($action === 'save_section') {
+                $sectionId = ($_POST['id'] ?? '') !== '' ? (int) $_POST['id'] : null;
+                $lessons->upsertSection(
+                    $sectionId,
+                    trim((string) ($_POST['title'] ?? '')),
+                    trim((string) ($_POST['slug'] ?? '')),
+                    (int) ($_POST['sort_order'] ?? 0)
+                );
+                $_SESSION['flash'] = 'Seção salva.';
+                if ($sectionId) {
+                    redirect('/admin/docs?edit_section='.$sectionId);
+                }
+                redirect('/admin/docs');
             }
             if ($action === 'delete_lesson') {
                 $lessons->deleteLesson((int) ($_POST['id'] ?? 0));
+                $_SESSION['flash'] = 'Página excluída.';
             }
-            redirect('/admin/lessons');
+            if ($action === 'delete_section') {
+                if (! $lessons->deleteSection((int) ($_POST['id'] ?? 0))) {
+                    $_SESSION['flash_error'] = 'Só é possível excluir seção sem páginas.';
+                } else {
+                    $_SESSION['flash'] = 'Seção excluída.';
+                }
+            }
+            redirect('/admin/docs');
         }
-        render('admin/lessons', [
+
+        $editLesson = null;
+        $editSection = null;
+        if (isset($_GET['edit_lesson'])) {
+            $editLesson = $lessons->findById((int) $_GET['edit_lesson']);
+        }
+        if (isset($_GET['edit_section'])) {
+            $editSection = $lessons->findSectionById((int) $_GET['edit_section']);
+        }
+
+        render('admin/docs', [
             'appName' => $appName,
-            'title' => 'Aulas',
+            'title' => 'Documentação',
             'sections' => $lessons->listSections(),
             'lessons' => $lessons->listAll(),
+            'editLesson' => $editLesson,
+            'editSection' => $editSection,
             'csrf' => Security::csrfToken(),
+            'flash' => $_SESSION['flash'] ?? null,
+            'error' => $_SESSION['flash_error'] ?? null,
+            'wide' => isset($_GET['edit_lesson']) || (isset($_GET['new']) && $_GET['new'] === 'lesson'),
         ], 'admin');
+        unset($_SESSION['flash'], $_SESSION['flash_error']);
         exit;
     }
 }

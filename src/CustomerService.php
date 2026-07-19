@@ -239,4 +239,57 @@ final class CustomerService
 
         return $this->findById((int) $row['customer_id']);
     }
+
+    /**
+     * @return array{ok:bool,message:string,customer?:array<string,mixed>}
+     */
+    public function updateOwnProfile(int $id, string $name, ?string $phone): array
+    {
+        $customer = $this->findById($id);
+        if (! $customer) {
+            return ['ok' => false, 'message' => 'Conta não encontrada.'];
+        }
+        $name = trim($name);
+        if ($name === '') {
+            return ['ok' => false, 'message' => 'Informe seu nome.'];
+        }
+        $phone = $phone !== null ? trim($phone) : null;
+        $stmt = $this->pdo->prepare(
+            'UPDATE customers SET name = :name, phone = :phone, updated_at = :u WHERE id = :id'
+        );
+        $stmt->execute([
+            'name' => $name,
+            'phone' => ($phone !== null && $phone !== '') ? $phone : null,
+            'u' => gmdate('c'),
+            'id' => $id,
+        ]);
+
+        return ['ok' => true, 'message' => 'Perfil atualizado.', 'customer' => $this->findById($id) ?? []];
+    }
+
+    /**
+     * @return array{ok:bool,message:string}
+     */
+    public function changeOwnPassword(int $id, string $currentPassword, string $newPassword): array
+    {
+        $customer = $this->findById($id);
+        if (! $customer) {
+            return ['ok' => false, 'message' => 'Conta não encontrada.'];
+        }
+        if (empty($customer['password_hash']) || ! password_verify($currentPassword, (string) $customer['password_hash'])) {
+            return ['ok' => false, 'message' => 'Senha atual incorreta.'];
+        }
+
+        $err = Security::validatePassword($newPassword, 8, false);
+        if ($err !== null) {
+            return ['ok' => false, 'message' => $err];
+        }
+        if (password_verify($newPassword, (string) $customer['password_hash'])) {
+            return ['ok' => false, 'message' => 'A nova senha deve ser diferente da atual.'];
+        }
+
+        $this->setPassword($id, $newPassword);
+
+        return ['ok' => true, 'message' => 'Senha atualizada.'];
+    }
 }

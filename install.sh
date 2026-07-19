@@ -216,5 +216,14 @@ if [ "$GENERATED_ADMIN_PASS" = "1" ]; then
 fi
 echo ""
 echo "Mesma VPS que o gateway: portal na porta ${HTTP_PORT}; gateway em 80/443."
+if [[ "$APP_URL" == https://* ]] && [[ "$APP_URL" != *":${HTTP_PORT}"* ]]; then
+  echo ""
+  echo "⚠ Cloudflare / domínio HTTPS:"
+  echo "  O container escuta só a porta ${HTTP_PORT}. Cloudflare (laranja) fala com a origem em 80/443."
+  echo "  Sem proxy reverso → Error 521."
+  echo "  Rode agora:"
+  echo "    cd ${INSTALL_DIR} && sudo bash setup-caddy-proxy.sh"
+  echo "  Depois no Cloudflare: SSL/TLS = Full (não Flexible)."
+fi
 echo "Atualizar depois: cd ${INSTALL_DIR} && sudo bash update.sh"
 echo ""

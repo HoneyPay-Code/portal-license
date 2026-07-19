@@ -25,6 +25,26 @@ Atualizar:
 cd /opt/honeypay-portal && sudo bash update.sh
 ```
 
+## Cloudflare (Error 521)
+
+O container escuta **8081**. O proxy laranja do Cloudflare só fala com a origem nas portas **80/443** (8081 não entra na lista).
+
+1. Confirme o portal local:
+
+```bash
+curl -sS http://127.0.0.1:8081/api/health
+```
+
+2. Suba o Caddy na 80/443 apontando para o Docker:
+
+```bash
+cd /opt/honeypay-portal && sudo bash setup-caddy-proxy.sh
+```
+
+3. No Cloudflare: DNS A `portal` → IP da VPS (proxied) e **SSL/TLS = Full** (ou Full Strict).
+
+Teste: `https://portal.honeypay.tech/api/health`
+
 ## Subir local
 
 ```bash

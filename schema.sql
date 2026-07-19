@@ -36,7 +36,18 @@ CREATE TABLE IF NOT EXISTS products (
     slug VARCHAR(128) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
     type VARCHAR(64) NULL,
+    kind VARCHAR(32) NOT NULL DEFAULT 'plugin',
+    description TEXT NULL,
+    price REAL NULL,
+    currency VARCHAR(8) NULL,
     checkout_url TEXT NULL,
+    image_path VARCHAR(512) NULL,
+    plugin_zip_path VARCHAR(512) NULL,
+    plugin_zip_filename VARCHAR(255) NULL,
+    plugin_zip_sha256 VARCHAR(128) NULL,
+    plugin_zip_size INTEGER NULL,
+    is_published INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

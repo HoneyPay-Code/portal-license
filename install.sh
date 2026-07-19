@@ -177,6 +177,7 @@ set_env APP_URL "$(quote_if_needed "$APP_URL")"
 set_env APP_ENV production
 set_env SESSION_SECURE false
 set_env TRUST_PROXY false
+set_env SESSION_LIFETIME_DAYS 30
 set_env LICENSE_SIGNING_KEY "$SIGNING_KEY"
 set_env WEBHOOK_ACCEPT_TEST false
 set_env ADMIN_EMAIL "$(quote_if_needed "$ADMIN_EMAIL")"

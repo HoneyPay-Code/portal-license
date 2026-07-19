@@ -20,14 +20,33 @@ final class Security
             $https = true;
         }
         $secure = $forceSecure || $https;
+
+        // Persistência: cliente + admin (padrão 30 dias). Renova a cada request (sliding).
+        $lifetimeDays = max(1, (int) Env::get('SESSION_LIFETIME_DAYS', '30'));
+        $lifetime = $lifetimeDays * 86400;
+        ini_set('session.gc_maxlifetime', (string) $lifetime);
+        ini_set('session.cookie_lifetime', (string) $lifetime);
+        ini_set('session.use_strict_mode', '1');
+
         session_set_cookie_params([
-            'lifetime' => 0,
+            'lifetime' => $lifetime,
             'path' => '/',
             'httponly' => true,
             'samesite' => 'Lax',
             'secure' => $secure,
         ]);
         session_start();
+
+        // Sliding window: cada visita empurra +30 dias (cookie + ficheiro de sessão).
+        if (session_status() === PHP_SESSION_ACTIVE && session_id() !== '') {
+            setcookie(session_name(), session_id(), [
+                'expires' => time() + $lifetime,
+                'path' => '/',
+                'httponly' => true,
+                'samesite' => 'Lax',
+                'secure' => $secure,
+            ]);
+        }
     }
 
     public static function sendSecurityHeaders(): void

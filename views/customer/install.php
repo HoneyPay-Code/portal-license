@@ -51,7 +51,7 @@
     <div class="card">
         <h2>Atualizar VPS (release nova)</h2>
         <p class="muted" style="margin-top:0">
-            Já tem o Honey Pay em <code>/opt/getfy</code>? Use este comando.
+            Já tem o Honey Pay instalado? Use este comando.
             Baixa o release oficial, atualiza o código e reinicia a stack — <strong>sem apagar banco nem storage</strong>.
         </p>
         <code class="license-key" id="update-cmd"><?= htmlspecialchars($updateCommand) ?></code>

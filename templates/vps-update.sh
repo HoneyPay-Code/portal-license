@@ -192,21 +192,30 @@ if [ ! -f "$ROOT_DIR/docker/up.sh" ] && [ ! -f "$ROOT_DIR/update-caddy.sh" ] && 
 fi
 
 echo ""
-echo "=== Aplicando arquivos (preserva .env, storage, .docker) ==="
-# Não apaga volumes Docker (postgres/redis/storage/.docker). Só sobrescreve código da app.
+echo "=== Aplicando arquivos (preserva .env, storage, .docker, plugins) ==="
+# Não apaga volumes Docker (postgres/redis/storage/.docker/plugins). Só sobrescreve código da app.
 if command -v rsync >/dev/null 2>&1; then
   $SUDO rsync -a \
     --exclude '.env' \
     --exclude '.env.*' \
     --exclude 'storage/' \
     --exclude '.docker/' \
+    --exclude 'plugins/' \
     --exclude 'node_modules/' \
     --exclude '.git/' \
     --exclude 'bootstrap/cache/*.php' \
     "$ROOT_DIR"/ "$INSTALL_DIR"/
 else
-  echo "rsync ausente — usando cp (menos fino)." >&2
+  echo "rsync ausente — usando cp (menos fino); salvando plugins..." >&2
+  if [ -d "$INSTALL_DIR/plugins" ]; then
+    $SUDO rm -rf "${TMP_DIR}/plugins-backup"
+    $SUDO cp -a "$INSTALL_DIR/plugins" "${TMP_DIR}/plugins-backup"
+  fi
   $SUDO cp -a "$ROOT_DIR"/. "$INSTALL_DIR"/
+  if [ -d "${TMP_DIR}/plugins-backup" ]; then
+    $SUDO rm -rf "$INSTALL_DIR/plugins"
+    $SUDO mv "${TMP_DIR}/plugins-backup" "$INSTALL_DIR/plugins"
+  fi
 fi
 
 # Mantém prefill de licença atualizado (não toca em dados).

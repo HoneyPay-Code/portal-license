@@ -1,3 +1,5 @@
+cd /opt/honeypay-portal && sudo bash update.sh
+
 # Honey Pay — License Portal
 
 Portal de licenças (cliente + admin + webhooks + releases do gateway).

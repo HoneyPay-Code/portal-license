@@ -4,6 +4,8 @@ RUN apk add --no-cache sqlite-dev wget $PHPIZE_DEPS \
     && docker-php-ext-install pdo_sqlite \
     && apk del $PHPIZE_DEPS
 
+COPY docker/php/uploads.ini /usr/local/etc/php/conf.d/uploads.ini
+
 WORKDIR /app
 
 COPY . /app

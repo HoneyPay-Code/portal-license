@@ -70,7 +70,7 @@ final class ReleaseService
         ?array $schemaFile = null,
     ): array {
         if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            throw new RuntimeException('Falha no upload do arquivo.');
+            throw new RuntimeException($this->uploadErrorMessage((int) ($file['error'] ?? UPLOAD_ERR_NO_FILE), 'ZIP'));
         }
 
         $name = (string) ($file['name'] ?? '');
@@ -78,7 +78,7 @@ final class ReleaseService
         $size = (int) ($file['size'] ?? 0);
 
         if ($tmp === '' || ! is_uploaded_file($tmp)) {
-            throw new RuntimeException('Arquivo de upload inválido.');
+            throw new RuntimeException('Arquivo ZIP de upload inválido (arquivo temporário ausente).');
         }
 
         if ($size <= 0 || $size > 512 * 1024 * 1024) {
@@ -508,7 +508,7 @@ final class ReleaseService
     private function storeSchemaUpload(array $file, string $safeVersion): array
     {
         if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            throw new RuntimeException('Falha no upload do arquivo SQL.');
+            throw new RuntimeException($this->uploadErrorMessage((int) ($file['error'] ?? UPLOAD_ERR_NO_FILE), 'SQL'));
         }
 
         $name = (string) ($file['name'] ?? '');
@@ -516,7 +516,7 @@ final class ReleaseService
         $size = (int) ($file['size'] ?? 0);
 
         if ($tmp === '' || ! is_uploaded_file($tmp)) {
-            throw new RuntimeException('Arquivo SQL de upload inválido.');
+            throw new RuntimeException('Arquivo SQL de upload inválido (arquivo temporário ausente).');
         }
 
         if ($size <= 0 || $size > 64 * 1024 * 1024) {
@@ -550,5 +550,21 @@ final class ReleaseService
             'sha256' => $sha,
             'size_bytes' => $size,
         ];
+    }
+
+    private function uploadErrorMessage(int $code, string $label): string
+    {
+        $limits = 'Limite atual do PHP: upload_max_filesize='.ini_get('upload_max_filesize')
+            .', post_max_size='.ini_get('post_max_size').'.';
+
+        return match ($code) {
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => "Arquivo {$label} excede o limite de upload. {$limits}",
+            UPLOAD_ERR_PARTIAL => "Upload do {$label} incompleto. Tente novamente.",
+            UPLOAD_ERR_NO_FILE => "Nenhum arquivo {$label} foi enviado.",
+            UPLOAD_ERR_NO_TMP_DIR => "Pasta temporária do servidor indisponível para o {$label}.",
+            UPLOAD_ERR_CANT_WRITE => "Falha ao gravar o {$label} no disco do servidor.",
+            UPLOAD_ERR_EXTENSION => "Uma extensão do PHP bloqueou o upload do {$label}.",
+            default => "Falha no upload do {$label} (código {$code}). {$limits}",
+        };
     }
 }

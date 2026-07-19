@@ -63,6 +63,23 @@ function require_csrf(): void
     }
 }
 
+/** Bytes do post_max_size do PHP (0 = desconhecido/ilimitado). */
+function php_post_max_bytes(): int
+{
+    $raw = trim((string) ini_get('post_max_size'));
+    if ($raw === '' || $raw === '0') {
+        return 0;
+    }
+    $unit = strtolower(substr($raw, -1));
+    $num = (float) $raw;
+    return (int) match ($unit) {
+        'g' => $num * 1024 * 1024 * 1024,
+        'm' => $num * 1024 * 1024,
+        'k' => $num * 1024,
+        default => $num,
+    };
+}
+
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
@@ -1195,6 +1212,14 @@ if (str_starts_with($path, '/admin')) {
             $action = (string) ($_POST['action'] ?? '');
             try {
                 if ($action === 'upload') {
+                    $contentLength = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+                    $postMax = php_post_max_bytes();
+                    if ($contentLength > 0 && empty($_POST) && empty($_FILES) && $postMax > 0 && $contentLength > $postMax) {
+                        throw new RuntimeException(
+                            'O envio excede post_max_size do PHP ('.ini_get('post_max_size').'). '
+                            .'Aumente o limite no servidor e tente de novo.'
+                        );
+                    }
                     $file = $_FILES['zip'] ?? null;
                     if (! is_array($file)) {
                         throw new RuntimeException('Selecione um arquivo ZIP.');

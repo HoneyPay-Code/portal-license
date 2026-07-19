@@ -94,6 +94,9 @@ $SUDO tee "$CADDY_FILE" >/dev/null <<EOF
 
 ${DOMAIN} {
   encode gzip
+  request_body {
+    max_size 520MB
+  }
   reverse_proxy 127.0.0.1:${HTTP_PORT}
   header {
     Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"

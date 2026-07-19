@@ -103,9 +103,9 @@
             <input type="hidden" name="action" value="upload">
             <label for="version">Versão</label>
             <input id="version" name="version" placeholder="2.0.0" required>
-            <label for="zip">Arquivo .zip (obrigatório)</label>
+            <label for="zip">Arquivo .zip (obrigatório, até 512 MB)</label>
             <input id="zip" type="file" name="zip" accept=".zip,application/zip" required>
-            <label for="schema">Dump SQL limpo (opcional)</label>
+            <label for="schema">Dump SQL limpo (opcional, até 64 MB)</label>
             <input id="schema" type="file" name="schema" accept=".sql,text/plain,application/sql">
             <p class="muted" style="font-size:12px;margin-top:-6px">Para hospedagem compartilhada: <code>public/install/database.sql</code> gerado com <code>php artisan getfy:export-shared-schema</code>.</p>
             <label for="notes">Notas (opcional)</label>

@@ -145,6 +145,52 @@ $isGatewayDefault = $product && (string) ($product['slug'] ?? '') === ProductSer
             <?php endif; ?>
         </div>
     </div>
+
+    <div class="card" style="margin-top:16px">
+        <h2>Webhook deste produto</h2>
+        <p class="muted">Configure no checkout externo. Em <code>pedido_pago</code>, libera só este produto.</p>
+        <?php
+            $appUrl = $appUrl ?? '';
+            $revealWebhook = ! empty($revealWebhook);
+            $whUrl = ! empty($product['webhook_token'])
+                ? rtrim((string) $appUrl, '/').'/webhooks/checkout/'.$product['webhook_token']
+                : '';
+            $whSecret = (string) ($product['webhook_secret'] ?? '');
+            $maskSecret = static function (string $secret): string {
+                $len = strlen($secret);
+                if ($len <= 8) {
+                    return str_repeat('•', max($len, 4));
+                }
+
+                return substr($secret, 0, 4).str_repeat('•', max(8, $len - 8)).substr($secret, -4);
+            };
+        ?>
+        <?php if ($whUrl === ''): ?>
+            <p class="muted">Credenciais ainda não geradas.</p>
+        <?php else: ?>
+            <label>URL</label>
+            <div class="license-key" id="product-wh-url"><?= htmlspecialchars($whUrl) ?></div>
+            <label style="margin-top:12px">Secret</label>
+            <div class="license-key" id="product-wh-secret">
+                <?= htmlspecialchars($revealWebhook ? $whSecret : $maskSecret($whSecret)) ?>
+            </div>
+            <p class="muted" style="font-size:13px;margin-top:8px">
+                Header: <code>Authorization: Bearer …</code> ou <code>X-Webhook-Secret: …</code>
+            </p>
+            <div class="row" style="margin-top:8px">
+                <button type="button" class="btn btn-secondary btn-sm" id="copy-wh-url">Copiar URL</button>
+                <?php if ($revealWebhook): ?>
+                    <button type="button" class="btn btn-secondary btn-sm" id="copy-wh-secret">Copiar secret</button>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+        <form method="post" style="margin-top:14px" onsubmit="return confirm('Gerar novas credenciais? O checkout antigo para de funcionar até atualizar.')">
+            <input type="hidden" name="_csrf" value="<?= htmlspecialchars($csrf) ?>">
+            <input type="hidden" name="action" value="rotate_webhook">
+            <input type="hidden" name="id" value="<?= (int) $product['id'] ?>">
+            <button type="submit">Gerar / rotacionar autenticação</button>
+        </form>
+    </div>
 <?php endif; ?>
 
 <script>
@@ -154,4 +200,18 @@ document.querySelectorAll('form.js-confirm-delete').forEach(function (form) {
         if (!window.confirm(msg)) e.preventDefault();
     });
 });
+function copyId(id, btn) {
+    var el = document.getElementById(id);
+    if (!el || !navigator.clipboard) return;
+    navigator.clipboard.writeText((el.textContent || '').trim()).then(function () {
+        if (!btn) return;
+        var old = btn.textContent;
+        btn.textContent = 'Copiado';
+        setTimeout(function () { btn.textContent = old; }, 1200);
+    });
+}
+var copyUrl = document.getElementById('copy-wh-url');
+if (copyUrl) copyUrl.addEventListener('click', function () { copyId('product-wh-url', copyUrl); });
+var copySecret = document.getElementById('copy-wh-secret');
+if (copySecret) copySecret.addEventListener('click', function () { copyId('product-wh-secret', copySecret); });
 </script>

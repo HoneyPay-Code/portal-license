@@ -155,25 +155,33 @@ if (($path === '/vps-install.sh' || $path === '/install.sh') && $method === 'GET
     exit;
 }
 
-// --- Checkout webhook ---
-if ($path === '/webhooks/checkout' && $method === 'POST') {
+// --- Checkout webhook (per-product) ---
+if ($method === 'POST' && preg_match('#^/webhooks/checkout/([a-f0-9]{32})$#', $path, $whMatch)) {
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'cli';
     if (! Security::rateLimit('webhook:'.$ip, 30, 60, $basePath)) {
         json_response(['ok' => false, 'message' => 'Too many requests'], 429);
     }
-    $secret = (string) Env::get('WEBHOOK_SECRET', '');
+
     $authHeader = (string) ($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
     $bearer = '';
     if (preg_match('/^\s*Bearer\s+(\S+)\s*$/i', $authHeader, $m)) {
         $bearer = $m[1];
     }
     $provided = $bearer !== '' ? $bearer : (string) ($_SERVER['HTTP_X_WEBHOOK_SECRET'] ?? '');
+
+    $bound = $products->findByWebhookToken($whMatch[1]);
+    if (! $bound || empty($bound['webhook_secret'])) {
+        json_response(['ok' => false, 'message' => 'Unknown webhook endpoint'], 404);
+    }
+    $secret = (string) $bound['webhook_secret'];
+    $boundProductId = (int) $bound['id'];
+
     if ($secret === '' || $provided === '' || ! hash_equals($secret, $provided)) {
         json_response(['ok' => false, 'message' => 'Unauthorized'], 401);
     }
+
     $body = request_json();
-    $result = $webhooks->handle($body);
-    // Do not return license_key in the public HTTP response.
+    $result = $webhooks->handle($body, $boundProductId);
     json_response([
         'ok' => (bool) ($result['ok'] ?? false),
         'message' => $result['message'] ?? '',
@@ -342,15 +350,29 @@ if (preg_match('#^/reset-password/([a-f0-9]{64})$#', $path, $m)) {
 
 // --- Customer app ---
 if (str_starts_with($path, '/app')) {
-    if (! $auth->customerCheck()) {
-        redirect('/login');
-    }
-    $customerId = (int) $auth->customerId();
-    $customer = $customers->findById($customerId);
-    if (! $customer || ($customer['status'] ?? '') !== 'active') {
-        $auth->logout();
-        Security::startSession();
-        redirect('/login');
+    $isDocsPath = $path === '/app/docs' || preg_match('#^/app/docs/[a-z0-9\-]+$#', $path);
+    $adminReadingDocs = $isDocsPath
+        && $auth->adminCheck()
+        && ! $auth->adminPending2fa();
+
+    if (! $adminReadingDocs) {
+        if (! $auth->customerCheck()) {
+            // Admin autenticado sem sessão de cliente: resto de /app não se aplica.
+            if ($auth->adminCheck() && ! $auth->adminPending2fa()) {
+                redirect('/admin');
+            }
+            redirect('/login');
+        }
+        $customerId = (int) $auth->customerId();
+        $customer = $customers->findById($customerId);
+        if (! $customer || ($customer['status'] ?? '') !== 'active') {
+            $auth->logout();
+            Security::startSession();
+            redirect('/login');
+        }
+    } else {
+        $customerId = 0;
+        $customer = null;
     }
 
     if ($path === '/app' || $path === '/app/') {
@@ -519,9 +541,12 @@ if (str_starts_with($path, '/app')) {
     }
 
     if ($path === '/app/docs') {
-        $hasAccess = $products->customerHasActiveEntitlement($customerId);
-        $sections = $hasAccess ? $lessons->sectionsWithLessons(true) : [];
-        $flat = $hasAccess ? $lessons->flatPublishedPages() : [];
+        $hasAccess = $adminReadingDocs || $products->customerHasActiveEntitlement($customerId);
+        $publishedOnly = ! $adminReadingDocs;
+        $sections = $hasAccess ? $lessons->sectionsWithLessons($publishedOnly) : [];
+        $flat = $hasAccess
+            ? ($publishedOnly ? $lessons->flatPublishedPages() : $lessons->flatPages(false))
+            : [];
         render('customer/docs_index', [
             'appName' => $appName,
             'title' => 'Documentação',
@@ -532,14 +557,25 @@ if (str_starts_with($path, '/app')) {
             'toc' => [],
             'prev' => null,
             'next' => $flat[0] ?? null,
+            'viewerIsAdmin' => $adminReadingDocs,
+            'docsBase' => '/app/docs',
+            'docsHomeHref' => $adminReadingDocs ? '/admin' : '/app',
+            'docsSecondaryHref' => $adminReadingDocs ? '/admin/docs' : '/app/install',
+            'docsSecondaryLabel' => $adminReadingDocs ? 'Editar docs' : 'Baixar / instalar',
+            'docsPrimaryLabel' => $adminReadingDocs ? 'Admin' : 'Minha conta',
         ], 'customer', 'layout_docs');
         exit;
     }
 
     if (preg_match('#^/app/docs/([a-z0-9\-]+)$#', $path, $m)) {
-        $hasAccess = $products->customerHasActiveEntitlement($customerId);
+        $hasAccess = $adminReadingDocs || $products->customerHasActiveEntitlement($customerId);
         $lesson = $lessons->findBySlug($m[1]);
-        if (! $lesson || empty($lesson['published'])) {
+        if (! $lesson) {
+            http_response_code(404);
+            echo 'Aula não encontrada';
+            exit;
+        }
+        if (! $adminReadingDocs && empty($lesson['published'])) {
             http_response_code(404);
             echo 'Aula não encontrada';
             exit;
@@ -548,19 +584,27 @@ if (str_starts_with($path, '/app')) {
             redirect('/app/docs');
         }
         $html = Markdown::toHtml((string) $lesson['body_markdown']);
-        $neighbors = $lessons->neighbors((string) $lesson['slug']);
+        $neighbors = $adminReadingDocs
+            ? $lessons->neighbors((string) $lesson['slug'], false)
+            : $lessons->neighbors((string) $lesson['slug'], true);
         render('customer/docs_show', [
             'appName' => $appName,
             'title' => (string) $lesson['title'],
             'active' => 'docs',
             'lesson' => $lesson,
             'html' => $html,
-            'sections' => $lessons->sectionsWithLessons(true),
+            'sections' => $lessons->sectionsWithLessons(! $adminReadingDocs),
             'hasAccess' => true,
             'activeSlug' => (string) $lesson['slug'],
             'toc' => Markdown::extractToc($html),
             'prev' => $neighbors['prev'],
             'next' => $neighbors['next'],
+            'viewerIsAdmin' => $adminReadingDocs,
+            'docsBase' => '/app/docs',
+            'docsHomeHref' => $adminReadingDocs ? '/admin' : '/app',
+            'docsSecondaryHref' => $adminReadingDocs ? '/admin/docs' : '/app/install',
+            'docsSecondaryLabel' => $adminReadingDocs ? 'Editar docs' : 'Baixar / instalar',
+            'docsPrimaryLabel' => $adminReadingDocs ? 'Admin' : 'Minha conta',
         ], 'customer', 'layout_docs');
         exit;
     }
@@ -723,11 +767,34 @@ if (str_starts_with($path, '/admin')) {
     }
 
     if ($path === '/admin/webhooks') {
+        if ($method === 'POST') {
+            require_csrf();
+            $action = (string) ($_POST['action'] ?? '');
+            if ($action === 'rotate_product') {
+                $pid = (int) ($_POST['product_id'] ?? 0);
+                $result = $products->rotateWebhookCredentials($pid, $appUrl);
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+                if ($result['ok']) {
+                    $_SESSION['reveal_product_id'] = $pid;
+                }
+            }
+            redirect('/admin/webhooks');
+        }
+
+        $products->ensureAllWebhookCredentials();
         render('admin/webhooks', [
             'appName' => $appName,
             'title' => 'Webhooks entrada',
             'events' => $webhooks->listEvents(100),
+            'productsList' => $products->listAll(),
+            'appUrl' => $appUrl,
+            'revealProductId' => isset($_SESSION['reveal_product_id']) ? (int) $_SESSION['reveal_product_id'] : null,
+            'csrf' => Security::csrfToken(),
+            'flash' => $_SESSION['flash'] ?? null,
+            'error' => $_SESSION['flash_error'] ?? null,
+            'acceptTest' => filter_var(Env::get('WEBHOOK_ACCEPT_TEST', 'false'), FILTER_VALIDATE_BOOLEAN),
         ], 'admin');
+        unset($_SESSION['flash'], $_SESSION['flash_error'], $_SESSION['reveal_product_id']);
         exit;
     }
 
@@ -1057,6 +1124,15 @@ if (str_starts_with($path, '/admin')) {
                 $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
                 redirect('/admin/products?edit='.$id);
             }
+            if ($action === 'rotate_webhook') {
+                $id = (int) ($_POST['id'] ?? 0);
+                $result = $products->rotateWebhookCredentials($id, $appUrl);
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+                if ($result['ok']) {
+                    $_SESSION['reveal_product_webhook'] = $id;
+                }
+                redirect('/admin/products?edit='.$id);
+            }
             redirect('/admin/products');
         }
 
@@ -1067,16 +1143,23 @@ if (str_starts_with($path, '/admin')) {
                 $_SESSION['flash_error'] = 'Produto não encontrado.';
                 redirect('/admin/products');
             }
+            if ($product) {
+                $products->ensureWebhookCredentials((int) $product['id']);
+                $product = $products->findById((int) $product['id']) ?? $product;
+            }
             render('admin/product_edit', [
                 'appName' => $appName,
                 'title' => $product ? 'Editar produto' : 'Novo produto',
                 'product' => $product,
                 'isNew' => $product === null,
+                'appUrl' => $appUrl,
+                'revealWebhook' => isset($_SESSION['reveal_product_webhook'])
+                    && (int) $_SESSION['reveal_product_webhook'] === (int) ($product['id'] ?? 0),
                 'csrf' => Security::csrfToken(),
                 'flash' => $_SESSION['flash'] ?? null,
                 'error' => $_SESSION['flash_error'] ?? null,
             ], 'admin');
-            unset($_SESSION['flash'], $_SESSION['flash_error']);
+            unset($_SESSION['flash'], $_SESSION['flash_error'], $_SESSION['reveal_product_webhook']);
             exit;
         }
 

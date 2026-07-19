@@ -22,11 +22,11 @@ final class ProductService
     {
         $existing = $this->findBySlug(self::DEFAULT_GATEWAY_SLUG);
         if ($existing) {
-            // Keep admin edits; only backfill kind if missing/empty.
             if (empty($existing['kind'])) {
                 $stmt = $this->pdo->prepare('UPDATE products SET kind = :k, updated_at = :u WHERE id = :id');
                 $stmt->execute(['k' => self::KIND_GATEWAY, 'u' => gmdate('c'), 'id' => (int) $existing['id']]);
             }
+            $this->ensureWebhookCredentials((int) $existing['id']);
 
             return;
         }
@@ -43,6 +43,92 @@ final class ProductService
             'sort_order' => 1,
             'type' => 'gateway',
         ]);
+    }
+
+    public function ensureWebhookCredentials(int $productId): void
+    {
+        $product = $this->findById($productId);
+        if (! $product) {
+            return;
+        }
+        if (! empty($product['webhook_token']) && ! empty($product['webhook_secret'])) {
+            return;
+        }
+        $this->rotateWebhookCredentials($productId);
+    }
+
+    /**
+     * @return array{ok:bool,message:string,token?:string,secret?:string,url?:string}
+     */
+    public function rotateWebhookCredentials(int $productId, string $appUrl = ''): array
+    {
+        $product = $this->findById($productId);
+        if (! $product) {
+            return ['ok' => false, 'message' => 'Produto não encontrado.'];
+        }
+
+        $token = bin2hex(random_bytes(16));
+        while ($this->findByWebhookToken($token)) {
+            $token = bin2hex(random_bytes(16));
+        }
+        $secret = bin2hex(random_bytes(24));
+
+        $stmt = $this->pdo->prepare(
+            'UPDATE products SET webhook_token = :t, webhook_secret = :s, updated_at = :u WHERE id = :id'
+        );
+        $stmt->execute([
+            't' => $token,
+            's' => $secret,
+            'u' => gmdate('c'),
+            'id' => $productId,
+        ]);
+
+        return [
+            'ok' => true,
+            'message' => 'Credenciais de webhook geradas. Atualize o checkout externo.',
+            'token' => $token,
+            'secret' => $secret,
+            'url' => $appUrl !== '' ? rtrim($appUrl, '/').'/webhooks/checkout/'.$token : '',
+        ];
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findByWebhookToken(string $token): ?array
+    {
+        $token = trim($token);
+        if ($token === '' || ! preg_match('/^[a-f0-9]{32}$/', $token)) {
+            return null;
+        }
+        $stmt = $this->pdo->prepare('SELECT * FROM products WHERE webhook_token = :t LIMIT 1');
+        $stmt->execute(['t' => $token]);
+        $row = $stmt->fetch();
+
+        return $row ?: null;
+    }
+
+    public function webhookUrl(array $product, string $appUrl): string
+    {
+        $token = (string) ($product['webhook_token'] ?? '');
+        if ($token === '') {
+            return '';
+        }
+
+        return rtrim($appUrl, '/').'/webhooks/checkout/'.$token;
+    }
+
+    public function ensureAllWebhookCredentials(): int
+    {
+        $count = 0;
+        foreach ($this->listAll() as $product) {
+            $before = (string) ($product['webhook_token'] ?? '');
+            $this->ensureWebhookCredentials((int) $product['id']);
+            $after = $this->findById((int) $product['id']);
+            if ($before === '' && ! empty($after['webhook_token'])) {
+                $count++;
+            }
+        }
+
+        return $count;
     }
 
     /** @return array<string, mixed>|null */
@@ -221,6 +307,10 @@ final class ProductService
         ]);
 
         $product = $this->findById((int) $this->pdo->lastInsertId());
+        if ($product) {
+            $this->ensureWebhookCredentials((int) $product['id']);
+            $product = $this->findById((int) $product['id']) ?? $product;
+        }
 
         return ['ok' => true, 'message' => 'Produto criado.', 'product' => $product ?? []];
     }

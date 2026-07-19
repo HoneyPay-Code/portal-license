@@ -95,6 +95,8 @@ final class Database
         self::ensureColumn($pdo, 'products', 'plugin_zip_size', 'INTEGER NULL');
         self::ensureColumn($pdo, 'products', 'is_published', 'INTEGER NOT NULL DEFAULT 1');
         self::ensureColumn($pdo, 'products', 'sort_order', 'INTEGER NOT NULL DEFAULT 0');
+        self::ensureColumn($pdo, 'products', 'webhook_token', 'VARCHAR(64) NULL');
+        self::ensureColumn($pdo, 'products', 'webhook_secret', 'VARCHAR(128) NULL');
     }
 
     private static function ensureColumn(PDO $pdo, string $table, string $column, string $definition): void

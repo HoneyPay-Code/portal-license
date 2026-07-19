@@ -8,12 +8,24 @@
 /** @var array{slug:string,title:string}|null $prev */
 /** @var array{slug:string,title:string}|null $next */
 /** @var bool $hasAccess */
+/** @var bool $viewerIsAdmin */
+/** @var string $docsBase */
+/** @var string $docsHomeHref */
+/** @var string $docsSecondaryHref */
+/** @var string $docsSecondaryLabel */
+/** @var string $docsPrimaryLabel */
 $sections = $sections ?? [];
 $activeSlug = $activeSlug ?? null;
 $toc = $toc ?? [];
 $prev = $prev ?? null;
 $next = $next ?? null;
 $hasAccess = $hasAccess ?? true;
+$viewerIsAdmin = ! empty($viewerIsAdmin);
+$docsBase = $docsBase ?? '/app/docs';
+$docsHomeHref = $docsHomeHref ?? '/app';
+$docsSecondaryHref = $docsSecondaryHref ?? '/app/install';
+$docsSecondaryLabel = $docsSecondaryLabel ?? 'Baixar / instalar';
+$docsPrimaryLabel = $docsPrimaryLabel ?? 'Minha conta';
 $searchIndex = [];
 $pageCount = 0;
 foreach ($sections as $section) {
@@ -353,14 +365,14 @@ foreach ($sections as $section) {
 <div class="docs-progress" id="docs-progress" aria-hidden="true"></div>
 <div class="docs-top">
     <button type="button" class="docs-menu-btn" id="docs-menu-btn" aria-label="Abrir sumário">Sumário</button>
-    <a class="docs-brand" href="/app">
+    <a class="docs-brand" href="<?= htmlspecialchars($docsHomeHref) ?>">
         <img src="/assets/logo.png" alt="<?= htmlspecialchars($appName) ?>" width="140" height="32">
-        <span class="docs-brand-label">Guia</span>
+        <span class="docs-brand-label"><?= $viewerIsAdmin ? 'Guia · Admin' : 'Guia' ?></span>
     </a>
     <div class="docs-top-links">
-        <a class="hide-mobile" href="/app">Minha conta</a>
-        <a class="hide-mobile" href="/app/install">Baixar / instalar</a>
-        <a href="/app/docs">Início do guia</a>
+        <a class="hide-mobile" href="<?= htmlspecialchars($docsHomeHref) ?>"><?= htmlspecialchars($docsPrimaryLabel) ?></a>
+        <a class="hide-mobile" href="<?= htmlspecialchars($docsSecondaryHref) ?>"><?= htmlspecialchars($docsSecondaryLabel) ?></a>
+        <a href="<?= htmlspecialchars($docsBase) ?>">Início do guia</a>
     </div>
 </div>
 <div class="docs-backdrop" id="docs-backdrop" hidden></div>
@@ -378,11 +390,14 @@ foreach ($sections as $section) {
                     <?php foreach (($section['lessons'] ?? []) as $item): ?>
                         <?php $slug = (string) $item['slug']; ?>
                         <a class="docs-nav-link <?= $activeSlug === $slug ? 'active' : '' ?>"
-                           href="/app/docs/<?= htmlspecialchars($slug) ?>"
+                           href="<?= htmlspecialchars($docsBase) ?>/<?= htmlspecialchars($slug) ?>"
                            data-slug="<?= htmlspecialchars($slug) ?>"
                            data-title="<?= htmlspecialchars((string) $item['title']) ?>"
                            data-section="<?= htmlspecialchars((string) $section['title']) ?>">
                             <?= htmlspecialchars((string) $item['title']) ?>
+                            <?php if ($viewerIsAdmin && empty($item['published'])): ?>
+                                <span style="opacity:.65;font-size:11px;font-weight:600"> · rascunho</span>
+                            <?php endif; ?>
                         </a>
                     <?php endforeach; ?>
                 </div>
@@ -394,7 +409,7 @@ foreach ($sections as $section) {
     <main class="docs-main">
         <?php if ($activeSlug && $activeSectionTitle): ?>
             <nav class="docs-crumb" aria-label="Caminho">
-                <a href="/app/docs">Guia</a>
+                <a href="<?= htmlspecialchars($docsBase) ?>">Guia</a>
                 <span class="sep">/</span>
                 <span><?= htmlspecialchars($activeSectionTitle) ?></span>
             </nav>
@@ -404,7 +419,7 @@ foreach ($sections as $section) {
             <nav class="docs-pager" aria-label="Páginas">
                 <div>
                     <?php if ($prev): ?>
-                        <a href="/app/docs/<?= htmlspecialchars($prev['slug']) ?>">
+                        <a href="<?= htmlspecialchars($docsBase) ?>/<?= htmlspecialchars($prev['slug']) ?>">
                             <span class="label">← Página anterior</span>
                             <span class="title"><?= htmlspecialchars($prev['title']) ?></span>
                         </a>
@@ -412,7 +427,7 @@ foreach ($sections as $section) {
                 </div>
                 <div class="next">
                     <?php if ($next): ?>
-                        <a href="/app/docs/<?= htmlspecialchars($next['slug']) ?>">
+                        <a href="<?= htmlspecialchars($docsBase) ?>/<?= htmlspecialchars($next['slug']) ?>">
                             <span class="label">Próxima página →</span>
                             <span class="title"><?= htmlspecialchars($next['title']) ?></span>
                         </a>

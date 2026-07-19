@@ -76,4 +76,5 @@ final class SettingsStore
             $this->set('mail_password', ($val !== null && $val !== '') ? $val : null);
         }
     }
+
 }

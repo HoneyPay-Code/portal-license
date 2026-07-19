@@ -23,7 +23,7 @@ final class WebhookProcessor
      * @param  array<string, mixed>  $body
      * @return array{ok:bool,message:string,license_key?:string}
      */
-    public function handle(array $body): array
+    public function handle(array $body, ?int $boundProductId = null): array
     {
         $event = (string) ($body['event'] ?? '');
         $payload = $body['payload'] ?? null;
@@ -39,7 +39,7 @@ final class WebhookProcessor
         $eventId = $this->logEvent($event, $orderId !== '' ? $orderId : null, $body);
 
         if ($event === 'pedido_pago') {
-            $result = $this->handlePaid($payload);
+            $result = $this->handlePaid($payload, $boundProductId);
             $this->markProcessed($eventId, $result['message']);
 
             return $result;
@@ -61,7 +61,7 @@ final class WebhookProcessor
      * @param  array<string, mixed>  $payload
      * @return array{ok:bool,message:string,license_key?:string}
      */
-    private function handlePaid(array $payload): array
+    private function handlePaid(array $payload, ?int $boundProductId = null): array
     {
         $externalOrderId = (string) ($payload['order']['id'] ?? '');
         if ($externalOrderId === '') {
@@ -93,13 +93,43 @@ final class WebhookProcessor
 
         $productData = is_array($payload['product'] ?? null) ? $payload['product'] : [];
         $offerData = is_array($payload['offer'] ?? null) ? $payload['offer'] : [];
-        $product = $this->products->upsertFromWebhook(
-            isset($productData['id']) ? (string) $productData['id'] : null,
-            isset($offerData['public_id']) ? (string) $offerData['public_id'] : (isset($offerData['id']) ? (string) $offerData['id'] : null),
-            (string) ($productData['name'] ?? 'Produto'),
-            isset($productData['type']) ? (string) $productData['type'] : null,
-            isset($productData['checkout_url']) ? (string) $productData['checkout_url'] : (isset($payload['checkoutUrl']) ? (string) $payload['checkoutUrl'] : null),
-        );
+
+        if ($boundProductId !== null) {
+            $product = $this->products->findById($boundProductId);
+            if (! $product) {
+                return ['ok' => false, 'message' => 'Bound product not found'];
+            }
+            // Sync external IDs from payload when empty
+            $extPid = isset($productData['id']) ? (string) $productData['id'] : null;
+            $extOid = isset($offerData['public_id'])
+                ? (string) $offerData['public_id']
+                : (isset($offerData['id']) ? (string) $offerData['id'] : null);
+            if (($extPid || $extOid) && (empty($product['external_product_id']) || empty($product['external_offer_id']))) {
+                $this->products->update((int) $product['id'], [
+                    'name' => (string) $product['name'],
+                    'slug' => (string) $product['slug'],
+                    'kind' => (string) ($product['kind'] ?? 'plugin'),
+                    'description' => $product['description'] ?? null,
+                    'price' => $product['price'] ?? null,
+                    'currency' => $product['currency'] ?? 'BRL',
+                    'checkout_url' => $product['checkout_url'] ?? null,
+                    'is_published' => ! empty($product['is_published']),
+                    'sort_order' => (int) ($product['sort_order'] ?? 100),
+                    'external_product_id' => $extPid ?: ($product['external_product_id'] ?? null),
+                    'external_offer_id' => $extOid ?: ($product['external_offer_id'] ?? null),
+                ]);
+                $product = $this->products->findById($boundProductId) ?? $product;
+            }
+        } else {
+            $product = $this->products->upsertFromWebhook(
+                isset($productData['id']) ? (string) $productData['id'] : null,
+                isset($offerData['public_id']) ? (string) $offerData['public_id'] : (isset($offerData['id']) ? (string) $offerData['id'] : null),
+                (string) ($productData['name'] ?? 'Produto'),
+                isset($productData['type']) ? (string) $productData['type'] : null,
+                isset($productData['checkout_url']) ? (string) $productData['checkout_url'] : (isset($payload['checkoutUrl']) ? (string) $payload['checkoutUrl'] : null),
+            );
+            $this->products->ensureWebhookCredentials((int) $product['id']);
+        }
 
         $orderRowId = $this->upsertOrder($externalOrderId, (int) $customer['id'], (int) $product['id'], $payload, 'completed');
         $this->products->grantEntitlement((int) $customer['id'], (int) $product['id'], $orderRowId);

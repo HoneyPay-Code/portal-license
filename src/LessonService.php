@@ -52,14 +52,22 @@ final class LessonService
     }
 
     /**
-     * Flat list of published lessons in reading order.
+     * Flat list of lessons in reading order.
      *
      * @return list<array{slug:string,title:string}>
      */
     public function flatPublishedPages(): array
     {
+        return $this->flatPages(true);
+    }
+
+    /**
+     * @return list<array{slug:string,title:string}>
+     */
+    public function flatPages(bool $publishedOnly = true): array
+    {
         $flat = [];
-        foreach ($this->sectionsWithLessons(true) as $section) {
+        foreach ($this->sectionsWithLessons($publishedOnly) as $section) {
             foreach (($section['lessons'] ?? []) as $lesson) {
                 $flat[] = [
                     'slug' => (string) $lesson['slug'],
@@ -74,9 +82,9 @@ final class LessonService
     /**
      * @return array{prev: ?array{slug:string,title:string}, next: ?array{slug:string,title:string}}
      */
-    public function neighbors(string $slug): array
+    public function neighbors(string $slug, bool $publishedOnly = true): array
     {
-        $pages = $this->flatPublishedPages();
+        $pages = $this->flatPages($publishedOnly);
         $prev = null;
         $next = null;
         foreach ($pages as $i => $page) {

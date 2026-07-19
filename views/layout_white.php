@@ -331,6 +331,7 @@ $nav = $nav ?? 'guest';
             <a href="/admin/customers">Clientes</a>
             <a href="/admin/orders">Pedidos</a>
             <a href="/admin/docs">Docs</a>
+            <a href="/app/docs" target="_blank" rel="noopener">Guia</a>
             <a href="/admin/webhooks">Webhooks entrada</a>
             <a href="/admin/outbound-webhooks">Webhooks saída</a>
             <a href="/admin/account">Conta</a>

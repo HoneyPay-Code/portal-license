@@ -58,7 +58,7 @@ docker compose up -d --build
 
 ## Segurança (produção)
 
-- `APP_ENV=production` recusa secrets fracos (`LICENSE_SIGNING_KEY`, `WEBHOOK_SECRET`, `ADMIN_PASSWORD`).
+- `APP_ENV=production` recusa secrets fracos (`LICENSE_SIGNING_KEY`, `ADMIN_PASSWORD`).
 - O `install.sh` gera secrets fortes automaticamente.
 - Logout só via `POST /logout` (CSRF).
 
@@ -73,4 +73,6 @@ curl -fsSL https://SEU-PORTAL:8081/vps-install.sh | sudo bash
 
 ## Webhook
 
-`POST /webhooks/checkout` com `Authorization: Bearer <WEBHOOK_SECRET>`.
+`POST /webhooks/checkout/{token}` com `Authorization: Bearer <secret-do-produto>` (ou `X-Webhook-Secret`).
+
+URL e secret ficam em Admin → Webhooks entrada (por produto).

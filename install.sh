@@ -139,7 +139,6 @@ else
 fi
 
 SIGNING_KEY="${LICENSE_SIGNING_KEY:-$(openssl rand -hex 32)}"
-WEBHOOK_SECRET="${WEBHOOK_SECRET:-$(openssl rand -hex 24)}"
 
 if [ ! -f .env ]; then
   $SUDO cp .env.example .env
@@ -179,7 +178,6 @@ set_env APP_ENV production
 set_env SESSION_SECURE false
 set_env TRUST_PROXY false
 set_env LICENSE_SIGNING_KEY "$SIGNING_KEY"
-set_env WEBHOOK_SECRET "$WEBHOOK_SECRET"
 set_env WEBHOOK_ACCEPT_TEST false
 set_env ADMIN_EMAIL "$(quote_if_needed "$ADMIN_EMAIL")"
 set_env ADMIN_PASSWORD "$(quote_if_needed "$ADMIN_PASSWORD")"

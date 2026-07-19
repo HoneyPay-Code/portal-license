@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS products (
     plugin_zip_size INTEGER NULL,
     is_published INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0,
+    webhook_token VARCHAR(64) NULL,
+    webhook_secret VARCHAR(128) NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

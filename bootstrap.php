@@ -60,6 +60,7 @@ $settings = new SettingsStore($pdo);
 $customers = new CustomerService($pdo);
 $products = new ProductService($pdo, $basePath);
 $products->seedDefaults();
+$products->ensureAllWebhookCredentials();
 $licenses = new LicenseService($pdo, $signingKey !== '' ? $signingKey : 'dev-signing-key', Env::get('SUPPORT_CONTACT'));
 $releases = new ReleaseService($pdo, $basePath, $licenses, $appUrl);
 $lessons = new LessonService($pdo);

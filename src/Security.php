@@ -150,14 +150,10 @@ final class Security
         }
         $weak = self::weakSecretDefaults();
         $signing = (string) Env::get('LICENSE_SIGNING_KEY', '');
-        $webhook = (string) Env::get('WEBHOOK_SECRET', '');
         $adminPass = (string) Env::get('ADMIN_PASSWORD', '');
         $problems = [];
         if (in_array($signing, $weak, true) || strlen($signing) < 32) {
             $problems[] = 'LICENSE_SIGNING_KEY';
-        }
-        if (in_array($webhook, $weak, true) || strlen($webhook) < 24) {
-            $problems[] = 'WEBHOOK_SECRET';
         }
         if (in_array($adminPass, $weak, true)) {
             $problems[] = 'ADMIN_PASSWORD (bootstrap default)';

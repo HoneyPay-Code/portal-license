@@ -46,9 +46,6 @@
         <div class="row" style="margin-top:12px">
             <button type="button" class="btn btn-secondary btn-sm" data-copy="#install-cmd">Copiar comando</button>
         </div>
-        <p class="muted" style="margin-top:14px;margin-bottom:0;font-size:13px">
-            Opcional: <code>HONEYPAY_LICENSE_KEY=LIC-…</code> para pular o prompt.
-        </p>
     </div>
 </div>
 <?php endif; ?>

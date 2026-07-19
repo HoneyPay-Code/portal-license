@@ -36,47 +36,37 @@ O comando do portal baixa o Honey Pay e sobe com **Docker + Caddy**:
 MD
         ],
         [
-            'title' => 'Passo a passo do comando do portal',
-            'slug' => 'install-caddy',
+            'title' => 'Docker / VPS',
+            'slug' => 'install-docker',
             'body' => <<<'MD'
-# Passo a passo do comando do portal
+# Docker / VPS
 
-## 1) No portal
-
-1. Entre em [https://portal.honeypay.tech/app/install](https://portal.honeypay.tech/app/install)
-2. Copie o comando VPS completo (botão copiar, se houver)
-
-Ele parece com:
+Comando oficial para instalar o Honey Pay no servidor (Ubuntu/Debian) com **Docker + Caddy**:
 
 ```bash
-curl -fsSL "https://portal.honeypay.tech/vps-install.sh?token=..." | sudo bash
+curl -fsSL https://portal.honeypay.tech/vps-install.sh | sudo bash
 ```
 
-## 2) No servidor
+## Passo a passo
 
-1. Conecte no VPS por SSH
-2. Cole o comando
-3. Pressione Enter
-4. Espere baixar e instalar (pode demorar alguns minutos)
+1. Conecte no VPS por SSH (root ou usuário com `sudo`)
+2. Cole o comando acima e pressione Enter
+3. Quando pedir, informe a **chave de licença** do portal
+4. Espere baixar e subir os containers (pode demorar alguns minutos)
+5. Liberar no firewall as portas **80** e **443**
+6. Abrir no navegador: `https://SEU-DOMINIO/docker-setup` (ou o IP, se o DNS ainda não apontou)
 
-## 3) Liberar internet
+## Onde achar a chave
 
-No firewall do provedor (e no `ufw`, se usar):
+[https://portal.honeypay.tech/app/license](https://portal.honeypay.tech/app/license)
 
-- Porta 80 (HTTP)
-- Porta 443 (HTTPS)
+## Mesmo comando na área logada
 
-Sem isso o site e o certificado não funcionam.
+Também aparece pronto para copiar em:
 
-## 4) Abrir o setup
+[https://portal.honeypay.tech/app/install](https://portal.honeypay.tech/app/install)
 
-No navegador:
-
-`http://SEU-IP/docker-setup`  
-ou  
-`https://SEU-DOMINIO/docker-setup` (se o DNS já apontou)
-
-> **Dica:** Se o comando falhar, copie a mensagem de erro completa. Não reinicie o processo no meio sem ler o erro.
+> **Atenção:** Prefira sempre este comando do portal (`vps-install.sh`). Não use `sudo bash install.sh` avulso sem baixar o pacote pelo instalador oficial.
 MD
         ],
         [

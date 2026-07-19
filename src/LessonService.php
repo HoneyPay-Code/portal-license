@@ -8,7 +8,7 @@ use PDO;
 
 final class LessonService
 {
-    public const SEED_VERSION = '2026-07-19b';
+    public const SEED_VERSION = '2026-07-19c';
 
     public function __construct(private PDO $pdo) {}
 

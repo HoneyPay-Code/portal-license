@@ -46,6 +46,9 @@
         <div class="row" style="margin-top:12px">
             <button type="button" class="btn btn-secondary btn-sm" data-copy="#install-cmd">Copiar comando</button>
         </div>
+        <p class="muted" style="margin-top:12px;margin-bottom:0;font-size:13px">
+            O instalador vai pedir a chave <code>LIC-...</code> no terminal. Copie antes em <a href="/app/license">Licença</a>.
+        </p>
     </div>
 </div>
 <?php endif; ?>

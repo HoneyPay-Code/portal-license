@@ -41,16 +41,35 @@ echo "Destino: ${INSTALL_DIR}"
 echo "Portas: HTTP ${HTTP_PORT} / HTTPS ${HTTPS_PORT}"
 echo ""
 
+# Com `curl | bash`, o stdin é o próprio script — por isso a chave
+# interativa SEMPRE deve vir do terminal (/dev/tty), nunca do stdin.
 LICENSE_KEY="${HONEYPAY_LICENSE_KEY:-}"
 if [ -z "$LICENSE_KEY" ]; then
-  printf "Cole a chave de licença (LIC-...): "
-  read -r LICENSE_KEY
+  if [ -r /dev/tty ]; then
+    printf "Cole a chave de licença (LIC-...): " > /dev/tty
+    # shellcheck disable=SC2162
+    read -r LICENSE_KEY < /dev/tty
+  else
+    echo "Não foi possível ler o teclado (sem /dev/tty)." >&2
+    echo "Rode assim:" >&2
+    echo "  curl -fsSL ${PORTAL_URL}/vps-install.sh -o /tmp/honeypay-vps-install.sh" >&2
+    echo "  sudo bash /tmp/honeypay-vps-install.sh" >&2
+    echo "Ou defina HONEYPAY_LICENSE_KEY=LIC-... antes do comando." >&2
+    exit 1
+  fi
 fi
 LICENSE_KEY="$(printf '%s' "$LICENSE_KEY" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 if [ -z "$LICENSE_KEY" ]; then
   echo "Licença obrigatória." >&2
   exit 1
 fi
+if ! printf '%s' "$LICENSE_KEY" | grep -Eq '^LIC-'; then
+  echo "A chave deve começar com LIC- (copiada em ${PORTAL_URL}/app/license)." >&2
+  exit 1
+fi
+
+echo "Chave recebida. Continuando…"
+echo ""
 
 $SUDO apt-get update -y
 $SUDO apt-get install -y ca-certificates curl unzip

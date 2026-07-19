@@ -47,6 +47,8 @@ Comando oficial para instalar o Honey Pay no servidor (Ubuntu/Debian) com **Dock
 curl -fsSL https://portal.honeypay.tech/vps-install.sh | sudo bash
 ```
 
+Quando aparecer o pedido, cole a chave `LIC-...` (página Licença do portal) e pressione Enter.
+
 ## Passo a passo
 
 1. Conecte no VPS por SSH (root ou usuário com `sudo`)
@@ -55,6 +57,13 @@ curl -fsSL https://portal.honeypay.tech/vps-install.sh | sudo bash
 4. Espere baixar e subir os containers (pode demorar alguns minutos)
 5. Liberar no firewall as portas **80** e **443**
 6. Abrir no navegador: `https://SEU-DOMINIO/docker-setup` (ou o IP, se o DNS ainda não apontou)
+
+## Alternativa (se o prompt não aparecer)
+
+```bash
+curl -fsSL https://portal.honeypay.tech/vps-install.sh -o /tmp/honeypay-vps-install.sh
+sudo bash /tmp/honeypay-vps-install.sh
+```
 
 ## Onde achar a chave
 

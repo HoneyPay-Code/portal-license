@@ -611,15 +611,31 @@ final class ProductService
     {
         $stmt = $this->pdo->prepare(
             'SELECT e.*, p.name AS product_name, p.slug, p.checkout_url, p.type, p.kind, p.description,
-                    p.price, p.currency, p.image_path, p.plugin_zip_path, p.plugin_zip_filename, p.plugin_zip_size
+                    p.price, p.currency, p.image_path, p.plugin_zip_path, p.plugin_zip_filename, p.plugin_zip_size,
+                    o.id AS order_row_id, o.external_order_id, o.status AS order_status,
+                    o.amount AS order_amount, o.currency AS order_currency, o.payment_method AS order_payment_method,
+                    o.created_at AS order_created_at
              FROM entitlements e
              JOIN products p ON p.id = e.product_id
+             LEFT JOIN orders o ON o.id = e.order_id
              WHERE e.customer_id = :cid AND e.status = :status
              ORDER BY p.sort_order ASC, e.id DESC'
         );
         $stmt->execute(['cid' => $customerId, 'status' => 'active']);
+        $rows = $stmt->fetchAll() ?: [];
 
-        return $stmt->fetchAll() ?: [];
+        foreach ($rows as &$row) {
+            $orderId = isset($row['order_row_id']) ? (int) $row['order_row_id'] : 0;
+            $row['refund_eligible'] = $orderId > 0
+                && ($row['order_status'] ?? '') === 'completed'
+                && RefundService::isCardPayment(
+                    isset($row['order_payment_method']) ? (string) $row['order_payment_method'] : null
+                )
+                && RefundService::isWithinRefundWindow((string) ($row['order_created_at'] ?? ''));
+        }
+        unset($row);
+
+        return $rows;
     }
 
     /**

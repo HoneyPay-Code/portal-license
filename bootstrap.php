@@ -26,6 +26,7 @@ use LicenseApi\LicenseService;
 use LicenseApi\Mailer;
 use LicenseApi\OutboundWebhookService;
 use LicenseApi\ProductService;
+use LicenseApi\RefundService;
 use LicenseApi\ReleaseService;
 use LicenseApi\SecretBox;
 use LicenseApi\Security;
@@ -93,6 +94,7 @@ $webhooks = new WebhookProcessor(
     $appUrl,
     filter_var(Env::get('WEBHOOK_ACCEPT_TEST', 'false'), FILTER_VALIDATE_BOOLEAN)
 );
+$refunds = new RefundService($pdo, $products, $licenses, $customers, $mailer);
 
 return compact(
     'basePath',
@@ -108,6 +110,7 @@ return compact(
     'outbound',
     'adminTotp',
     'webhooks',
+    'refunds',
     'appUrl',
     'appName',
     'appEnv',

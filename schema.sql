@@ -70,6 +70,23 @@ CREATE TABLE IF NOT EXISTS orders (
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS refund_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    customer_id INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    admin_notes TEXT NULL,
+    processed_at TEXT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_refund_requests_order ON refund_requests(order_id);
+CREATE INDEX IF NOT EXISTS idx_refund_requests_status ON refund_requests(status);
+
 CREATE TABLE IF NOT EXISTS entitlements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     customer_id INTEGER NOT NULL,

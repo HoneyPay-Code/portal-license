@@ -63,7 +63,7 @@ final class Database
             foreach ([
                 'customer_note', 'body_markdown', 'raw_json', 'payload_json', 'process_result', 'checkout_url',
                 'events', 'request_body', 'response_body', 'url', 'value', 'bearer_token', 'totp_secret',
-                'description',
+                'description', 'reason', 'admin_notes',
             ] as $keep) {
                 $schema = str_replace("{$keep} DATETIME NULL", "{$keep} TEXT NULL", $schema);
                 $schema = str_replace("{$keep} DATETIME NOT NULL", "{$keep} TEXT NOT NULL", $schema);

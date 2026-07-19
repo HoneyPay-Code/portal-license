@@ -546,8 +546,28 @@ if (str_starts_with($path, '/app')) {
             'active' => 'products',
             'entitlements' => $products->entitlementsForCustomer($customerId),
             'catalog' => $products->catalogForCustomer($customerId),
+            'csrf' => Security::csrfToken(),
+            'flash' => $_SESSION['flash'] ?? null,
+            'error' => $_SESSION['flash_error'] ?? null,
         ], 'customer');
+        unset($_SESSION['flash'], $_SESSION['flash_error']);
         exit;
+    }
+
+    if ($path === '/app/products/refund' && $method === 'POST') {
+        require_csrf();
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        if (! Security::rateLimit('refund:'.$customerId.':'.$ip, 10, 600, $basePath)) {
+            $_SESSION['flash_error'] = 'Muitas tentativas. Aguarde alguns minutos.';
+            redirect('/app/products');
+        }
+        $result = $refunds->request(
+            $customerId,
+            (int) ($_POST['order_id'] ?? 0),
+            (string) ($_POST['reason'] ?? '')
+        );
+        $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+        redirect('/app/products');
     }
 
     if (preg_match('#^/app/products/([a-z0-9\-]+)/image$#', $path, $m)) {
@@ -840,6 +860,33 @@ if (str_starts_with($path, '/admin')) {
             'title' => 'Pedidos',
             'orders' => $webhooks->listOrders(),
         ], 'admin');
+        exit;
+    }
+
+    if ($path === '/admin/refunds') {
+        if ($method === 'POST') {
+            require_csrf();
+            $action = (string) ($_POST['action'] ?? '');
+            if ($action === 'complete') {
+                $result = $refunds->complete(
+                    (int) ($_POST['id'] ?? 0),
+                    isset($_POST['admin_notes']) ? (string) $_POST['admin_notes'] : null
+                );
+                $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
+            } else {
+                $_SESSION['flash_error'] = 'Ação inválida.';
+            }
+            redirect('/admin/refunds');
+        }
+        render('admin/refunds', [
+            'appName' => $appName,
+            'title' => 'Reembolsos',
+            'refunds' => $refunds->listForAdmin(),
+            'csrf' => Security::csrfToken(),
+            'flash' => $_SESSION['flash'] ?? null,
+            'error' => $_SESSION['flash_error'] ?? null,
+        ], 'admin');
+        unset($_SESSION['flash'], $_SESSION['flash_error']);
         exit;
     }
 

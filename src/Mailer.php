@@ -191,4 +191,20 @@ HTML;
 </body></html>
 HTML;
     }
+
+    public function refundRequestHtml(string $name): string
+    {
+        $name = htmlspecialchars($name);
+
+        return <<<HTML
+<!DOCTYPE html>
+<html><body style="font-family:system-ui,sans-serif;background:#f8fafc;padding:32px;color:#0f172a">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:28px">
+    <h1 style="margin:0 0 12px;font-size:22px">Solicitação de reembolso recebida</h1>
+    <p>Olá {$name}, recebemos sua solicitação de reembolso.</p>
+    <p>Seu acesso ao produto foi revogado. O estorno no cartão está em processamento e pode levar até <strong>30 dias</strong> para aparecer na fatura.</p>
+  </div>
+</body></html>
+HTML;
+    }
 }

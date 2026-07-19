@@ -172,6 +172,26 @@ if (($path === '/vps-install.sh' || $path === '/install.sh') && $method === 'GET
     exit;
 }
 
+if ($path === '/vps-update.sh' && $method === 'GET') {
+    $scriptPath = $basePath.'/templates/vps-update.sh';
+    if (! is_file($scriptPath)) {
+        http_response_code(404);
+        echo 'Updater missing';
+        exit;
+    }
+    $script = (string) file_get_contents($scriptPath);
+    $script = str_replace(
+        ['__PORTAL_URL__', '__APP_NAME__'],
+        [$appUrl, $appName],
+        $script
+    );
+    header('Content-Type: text/x-shellscript; charset=utf-8');
+    header('Content-Disposition: inline; filename="vps-update.sh"');
+    header('Cache-Control: no-store');
+    echo $script;
+    exit;
+}
+
 // --- Checkout webhook (per-product) ---
 if ($method === 'POST' && preg_match('#^/webhooks/checkout/([a-f0-9]{32})$#', $path, $whMatch)) {
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'cli';
@@ -478,11 +498,12 @@ if (str_starts_with($path, '/app')) {
         $currentRelease = $releases->currentRelease();
         render('customer/install', [
             'appName' => $appName,
-            'title' => 'Instalação',
+            'title' => 'Instalação + Update',
             'active' => 'install',
             'canDownload' => $canDownload,
             'currentRelease' => $currentRelease,
             'installCommand' => 'curl -fsSL '.$appUrl.'/vps-install.sh | sudo bash',
+            'updateCommand' => 'curl -fsSL '.$appUrl.'/vps-update.sh | sudo bash',
             'appUrl' => $appUrl,
             'error' => $_SESSION['flash_error'] ?? null,
         ], 'customer');
@@ -592,7 +613,7 @@ if (str_starts_with($path, '/app')) {
             'docsBase' => '/app/docs',
             'docsHomeHref' => $adminReadingDocs ? '/admin' : '/app',
             'docsSecondaryHref' => $adminReadingDocs ? '/admin/docs' : '/app/install',
-            'docsSecondaryLabel' => $adminReadingDocs ? 'Editar docs' : 'Baixar / instalar',
+            'docsSecondaryLabel' => $adminReadingDocs ? 'Editar docs' : 'Instalar / atualizar',
             'docsPrimaryLabel' => $adminReadingDocs ? 'Admin' : 'Minha conta',
         ], 'customer', 'layout_docs');
         exit;
@@ -634,7 +655,7 @@ if (str_starts_with($path, '/app')) {
             'docsBase' => '/app/docs',
             'docsHomeHref' => $adminReadingDocs ? '/admin' : '/app',
             'docsSecondaryHref' => $adminReadingDocs ? '/admin/docs' : '/app/install',
-            'docsSecondaryLabel' => $adminReadingDocs ? 'Editar docs' : 'Baixar / instalar',
+            'docsSecondaryLabel' => $adminReadingDocs ? 'Editar docs' : 'Instalar / atualizar',
             'docsPrimaryLabel' => $adminReadingDocs ? 'Admin' : 'Minha conta',
         ], 'customer', 'layout_docs');
         exit;

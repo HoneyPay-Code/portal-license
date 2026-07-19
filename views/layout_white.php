@@ -296,7 +296,7 @@ $nav = $nav ?? 'guest';
         <div class="nav">
             <a href="/app" class="<?= ($active ?? '') === 'dashboard' ? 'active' : '' ?>">Início</a>
             <a href="/app/license" class="<?= ($active ?? '') === 'license' ? 'active' : '' ?>">Licença</a>
-            <a href="/app/install" class="<?= ($active ?? '') === 'install' ? 'active' : '' ?>">Instalação</a>
+            <a href="/app/install" class="<?= ($active ?? '') === 'install' ? 'active' : '' ?>">Instalação + Update</a>
             <a href="/app/products" class="<?= ($active ?? '') === 'products' ? 'active' : '' ?>">Produtos</a>
             <a href="/app/docs" class="<?= ($active ?? '') === 'docs' ? 'active' : '' ?>">Documentação</a>
             <a href="/app/account" class="<?= ($active ?? '') === 'account' ? 'active' : '' ?>">Conta</a>

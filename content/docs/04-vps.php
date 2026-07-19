@@ -140,20 +140,38 @@ MD
             'body' => <<<'MD'
 # Atualizar no VPS
 
-## Antes de qualquer update
+Quando o admin publicar um **release novo** no portal, atualize a instalação Docker com o comando oficial (mesmo estilo da instalação):
 
-1. Backup do banco
-2. Backup da pasta de arquivos (`storage`)
-3. Anote a versão atual
+```bash
+curl -fsSL https://portal.honeypay.tech/vps-update.sh | sudo bash
+```
 
-## Como atualizar
+## O que o script faz
 
-1. Veja a release no [portal.honeypay.tech](https://portal.honeypay.tech)
-2. Siga o script/instruções de update da versão (quando disponível)
-3. Suba os containers de novo
-4. Teste login + um pagamento
+1. Pede a chave `LIC-...` (ou reusa a gravada na instalação)
+2. Valida a licença no portal e baixa o ZIP do release atual
+3. Atualiza os arquivos em `/opt/getfy` **sem apagar** `.env`, `storage` nem volumes Docker (banco)
+4. Recompila o frontend, sobe a stack e roda `migrate`
 
-> **Importante:** Update não é “apagar tudo e instalar de novo”. Isso apagaria dados. Sempre prefira o fluxo oficial de atualização com backup.
+## Antes de atualizar
+
+1. Backup do banco (recomendado)
+2. Anote a versão em `/opt/getfy/VERSION`
+
+## Alternativa (sem pipe)
+
+```bash
+curl -fsSL https://portal.honeypay.tech/vps-update.sh -o /tmp/honeypay-vps-update.sh
+sudo bash /tmp/honeypay-vps-update.sh
+```
+
+Ou com a chave já definida:
+
+```bash
+HONEYPAY_LICENSE_KEY='LIC-...' curl -fsSL https://portal.honeypay.tech/vps-update.sh | sudo bash
+```
+
+> **Importante:** Update **não** é apagar a pasta e instalar de novo. Use sempre o `vps-update.sh` do portal (também em [Instalação + Update](https://portal.honeypay.tech/app/install)).
 MD
         ],
     ],

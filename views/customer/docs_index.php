@@ -57,7 +57,7 @@ if ($hasAccess) {
                 <div class="desc">Onde achar a chave e como funciona a regra de 1 domínio.</div>
             </a>
             <a class="docs-home-card" href="/app/install">
-                <div class="kicker">Baixar arquivos</div>
+                <div class="kicker">Instalar / atualizar</div>
                 <div class="name">Página de instalação</div>
                 <div class="desc">ZIP para hospedagem e comando pronto para VPS.</div>
             </a>

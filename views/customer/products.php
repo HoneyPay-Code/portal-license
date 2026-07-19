@@ -62,7 +62,7 @@ $catalog = $catalog ?? [];
                         <?php endif; ?>
                         <div class="actions">
                             <?php if ($kind === 'gateway'): ?>
-                                <a class="btn btn-sm" href="/app/install">Instalar / baixar</a>
+                                <a class="btn btn-sm" href="/app/install">Instalar / atualizar</a>
                                 <a class="btn btn-secondary btn-sm" href="/app/docs">Documentação</a>
                             <?php elseif ($hasZip): ?>
                                 <a class="btn btn-sm" href="/app/products/<?= htmlspecialchars($slug) ?>/download">Baixar ZIP</a>

@@ -74,6 +74,12 @@ docker compose up -d --build
 curl -fsSL https://SEU-PORTAL:8081/vps-install.sh | sudo bash
 ```
 
+Atualizar o gateway (nova release):
+
+```bash
+curl -fsSL https://SEU-PORTAL:8081/vps-update.sh | sudo bash
+```
+
 ## Webhook
 
 `POST /webhooks/checkout/{token}` com `Authorization: Bearer <secret-do-produto>` (ou `X-Webhook-Secret`).

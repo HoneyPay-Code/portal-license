@@ -1,0 +1,22 @@
+services:
+  license-api:
+    build: .
+    container_name: honeypay-license-api
+    ports:
+      # Porta do host diferente do gateway (80/443) — padrão 8081
+      - "${LICENSE_API_HTTP_PORT:-8081}:8081"
+    env_file:
+      - .env
+    environment:
+      APP_URL: ${APP_URL:-http://localhost:8081}
+    volumes:
+      - ./storage:/app/storage
+      - ./templates:/app/templates:ro
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s

@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+/storage/*
+!/storage/.gitignore
+!/storage/releases/
+!/storage/releases/.gitignore
+*.sqlite
+*.sqlite3
+storage/rate/
+storage/mail.log
+.DS_Store
+body.txt
+*.log

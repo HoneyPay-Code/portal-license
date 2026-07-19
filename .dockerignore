@@ -1,0 +1,12 @@
+# Excluir do contexto de build (imagem)
+.env
+.env.*
+!.env.example
+.git
+storage/
+*.sqlite
+*.sqlite3
+mail.log
+**/mail.log
+.DS_Store
+body.txt

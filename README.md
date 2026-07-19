@@ -65,7 +65,8 @@ docker compose up -d --build
 ## Releases (ZIP do gateway)
 
 1. Admin → **Releases**: envie o `.zip` do gateway e marque como atual.
-2. Cliente → **Instalação**: baixe o ZIP ou use:
+2. Opcional: anexe o dump SQL limpo (`database.sql`) para hospedagem compartilhada.
+3. Cliente → **Instalação**: baixe o ZIP (e o SQL, se disponível) ou use:
 
 ```bash
 curl -fsSL https://SEU-PORTAL:8081/vps-install.sh | sudo bash

@@ -58,11 +58,17 @@ final class ReleaseService
     }
 
     /**
-     * @param array{name:string,tmp_name:string,size:int,error:int} $file
+     * @param array{name?:string,tmp_name?:string,size?:int,error?:int} $file
+     * @param array{name?:string,tmp_name?:string,size?:int,error?:int}|null $schemaFile
      * @return array<string, mixed>
      */
-    public function createFromUpload(array $file, string $version, ?string $notes = null, bool $makeCurrent = true): array
-    {
+    public function createFromUpload(
+        array $file,
+        string $version,
+        ?string $notes = null,
+        bool $makeCurrent = true,
+        ?array $schemaFile = null,
+    ): array {
         if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
             throw new RuntimeException('Falha no upload do arquivo.');
         }
@@ -102,6 +108,16 @@ final class ReleaseService
             throw new RuntimeException('Não foi possível salvar o ZIP.');
         }
 
+        $schemaMeta = null;
+        try {
+            if ($this->hasUploadedFile($schemaFile)) {
+                $schemaMeta = $this->storeSchemaUpload($schemaFile, $safeVersion);
+            }
+        } catch (\Throwable $e) {
+            @unlink($dest);
+            throw $e;
+        }
+
         $relative = 'storage/releases/'.$storedName;
         $now = gmdate('c');
 
@@ -110,8 +126,13 @@ final class ReleaseService
         }
 
         $stmt = $this->pdo->prepare(
-            'INSERT INTO releases (version, filename, storage_path, sha256, size_bytes, notes, is_current, created_at)
-             VALUES (:version, :filename, :storage_path, :sha256, :size_bytes, :notes, :is_current, :created_at)'
+            'INSERT INTO releases (
+                version, filename, storage_path, sha256, size_bytes, notes, is_current, created_at,
+                schema_filename, schema_storage_path, schema_sha256, schema_size_bytes
+             ) VALUES (
+                :version, :filename, :storage_path, :sha256, :size_bytes, :notes, :is_current, :created_at,
+                :schema_filename, :schema_storage_path, :schema_sha256, :schema_size_bytes
+             )'
         );
         $stmt->execute([
             'version' => $version,
@@ -122,11 +143,78 @@ final class ReleaseService
             'notes' => $notes !== null && trim($notes) !== '' ? trim($notes) : null,
             'is_current' => $makeCurrent ? 1 : 0,
             'created_at' => $now,
+            'schema_filename' => $schemaMeta['filename'] ?? null,
+            'schema_storage_path' => $schemaMeta['storage_path'] ?? null,
+            'schema_sha256' => $schemaMeta['sha256'] ?? null,
+            'schema_size_bytes' => $schemaMeta['size_bytes'] ?? null,
         ]);
 
         $id = (int) $this->pdo->lastInsertId();
 
         return $this->findById($id) ?? throw new RuntimeException('Release não encontrada após upload.');
+    }
+
+    /**
+     * Anexa ou substitui o dump SQL de um release existente.
+     *
+     * @param array{name?:string,tmp_name?:string,size?:int,error?:int} $schemaFile
+     * @return array<string, mixed>
+     */
+    public function attachSchema(int $id, array $schemaFile): array
+    {
+        $release = $this->findById($id);
+        if (! $release) {
+            throw new RuntimeException('Release não encontrada.');
+        }
+
+        $safeVersion = preg_replace('/[^a-zA-Z0-9._-]+/', '-', (string) $release['version']) ?: 'release';
+        $schemaMeta = $this->storeSchemaUpload($schemaFile, $safeVersion);
+        $oldSchema = $this->absoluteSchemaPath($release);
+
+        $stmt = $this->pdo->prepare(
+            'UPDATE releases SET
+                schema_filename = :schema_filename,
+                schema_storage_path = :schema_storage_path,
+                schema_sha256 = :schema_sha256,
+                schema_size_bytes = :schema_size_bytes
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'schema_filename' => $schemaMeta['filename'],
+            'schema_storage_path' => $schemaMeta['storage_path'],
+            'schema_sha256' => $schemaMeta['sha256'],
+            'schema_size_bytes' => $schemaMeta['size_bytes'],
+            'id' => $id,
+        ]);
+
+        $updated = $this->findById($id) ?? $release;
+        $newSchema = $this->absoluteSchemaPath($updated);
+        if ($oldSchema !== '' && is_file($oldSchema) && $oldSchema !== $newSchema) {
+            @unlink($oldSchema);
+        }
+
+        return $updated;
+    }
+
+    public function removeSchema(int $id): void
+    {
+        $release = $this->findById($id);
+        if (! $release) {
+            return;
+        }
+        $path = $this->absoluteSchemaPath($release);
+        $stmt = $this->pdo->prepare(
+            'UPDATE releases SET
+                schema_filename = NULL,
+                schema_storage_path = NULL,
+                schema_sha256 = NULL,
+                schema_size_bytes = NULL
+             WHERE id = :id'
+        );
+        $stmt->execute(['id' => $id]);
+        if ($path !== '' && is_file($path)) {
+            @unlink($path);
+        }
     }
 
     public function setCurrent(int $id): void
@@ -148,11 +236,15 @@ final class ReleaseService
         }
 
         $path = $this->absolutePath($release);
+        $schemaPath = $this->absoluteSchemaPath($release);
         $stmt = $this->pdo->prepare('DELETE FROM releases WHERE id = :id');
         $stmt->execute(['id' => $id]);
 
         if (is_file($path)) {
             @unlink($path);
+        }
+        if ($schemaPath !== '' && is_file($schemaPath)) {
+            @unlink($schemaPath);
         }
     }
 
@@ -164,6 +256,28 @@ final class ReleaseService
         $relative = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, (string) ($release['storage_path'] ?? ''));
 
         return $this->basePath.DIRECTORY_SEPARATOR.$relative;
+    }
+
+    /**
+     * @param array<string, mixed> $release
+     */
+    public function absoluteSchemaPath(array $release): string
+    {
+        $relative = trim((string) ($release['schema_storage_path'] ?? ''));
+        if ($relative === '') {
+            return '';
+        }
+        $relative = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relative);
+
+        return $this->basePath.DIRECTORY_SEPARATOR.$relative;
+    }
+
+    /** @param array<string, mixed> $release */
+    public function hasSchema(array $release): bool
+    {
+        $path = $this->absoluteSchemaPath($release);
+
+        return $path !== '' && is_file($path);
     }
 
     public function customerMayDownload(int $customerId): bool
@@ -325,6 +439,38 @@ final class ReleaseService
         exit;
     }
 
+    /**
+     * @param array<string, mixed> $release
+     * @return never
+     */
+    public function streamSchema(array $release, ?string $downloadName = null): void
+    {
+        $path = $this->absoluteSchemaPath($release);
+        if ($path === '' || ! is_file($path)) {
+            http_response_code(404);
+            echo 'Dump SQL não encontrado';
+            exit;
+        }
+
+        $name = $downloadName ?: (string) ($release['schema_filename'] ?? 'database.sql');
+        $name = preg_replace('/[^\w.\-]+/', '_', $name) ?: 'database.sql';
+        if (! str_ends_with(strtolower($name), '.sql')) {
+            $name .= '.sql';
+        }
+        $size = filesize($path);
+
+        header('Content-Type: application/sql; charset=utf-8');
+        header('Content-Disposition: attachment; filename="'.$name.'"');
+        if ($size !== false) {
+            header('Content-Length: '.$size);
+        }
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: no-store');
+
+        readfile($path);
+        exit;
+    }
+
     /** @param array<string, mixed> $license */
     private function licenseAllowsDownload(array $license): bool
     {
@@ -342,5 +488,67 @@ final class ReleaseService
         }
 
         return true;
+    }
+
+    /** @param array{name?:string,tmp_name?:string,size?:int,error?:int}|null $file */
+    private function hasUploadedFile(?array $file): bool
+    {
+        if ($file === null) {
+            return false;
+        }
+        $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+
+        return $error !== UPLOAD_ERR_NO_FILE;
+    }
+
+    /**
+     * @param array{name?:string,tmp_name?:string,size?:int,error?:int} $file
+     * @return array{filename:string,storage_path:string,sha256:string,size_bytes:int}
+     */
+    private function storeSchemaUpload(array $file, string $safeVersion): array
+    {
+        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('Falha no upload do arquivo SQL.');
+        }
+
+        $name = (string) ($file['name'] ?? '');
+        $tmp = (string) ($file['tmp_name'] ?? '');
+        $size = (int) ($file['size'] ?? 0);
+
+        if ($tmp === '' || ! is_uploaded_file($tmp)) {
+            throw new RuntimeException('Arquivo SQL de upload inválido.');
+        }
+
+        if ($size <= 0 || $size > 64 * 1024 * 1024) {
+            throw new RuntimeException('SQL inválido ou maior que 64 MB.');
+        }
+
+        $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        if ($ext !== 'sql') {
+            throw new RuntimeException('Envie um arquivo .sql (dump limpo do banco).');
+        }
+
+        $head = (string) file_get_contents($tmp, false, null, 0, 2048);
+        if ($head === '' || ! preg_match('/\b(CREATE|INSERT|SET|DROP|ALTER|TRUNCATE)\b/i', $head)) {
+            throw new RuntimeException('O arquivo não parece um dump SQL válido.');
+        }
+
+        $sha = hash_file('sha256', $tmp);
+        if ($sha === false) {
+            throw new RuntimeException('Não foi possível calcular o checksum do SQL.');
+        }
+
+        $storedName = $safeVersion.'-schema-'.bin2hex(random_bytes(6)).'.sql';
+        $dest = $this->storageDir().DIRECTORY_SEPARATOR.$storedName;
+        if (! move_uploaded_file($tmp, $dest)) {
+            throw new RuntimeException('Não foi possível salvar o arquivo SQL.');
+        }
+
+        return [
+            'filename' => $name !== '' ? $name : 'database.sql',
+            'storage_path' => 'storage/releases/'.$storedName,
+            'sha256' => $sha,
+            'size_bytes' => $size,
+        ];
     }
 }

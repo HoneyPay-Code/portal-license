@@ -487,6 +487,20 @@ if (str_starts_with($path, '/app')) {
         $releases->streamRelease($current, $downloadName);
     }
 
+    if ($path === '/app/install/download-schema' && $method === 'GET') {
+        if (! $releases->customerMayDownload($customerId)) {
+            $_SESSION['flash_error'] = 'Licença ativa necessária para baixar.';
+            redirect('/app/install');
+        }
+        $current = $releases->currentRelease();
+        if (! $current || ! $releases->hasSchema($current)) {
+            $_SESSION['flash_error'] = 'Nenhum dump SQL disponível nesta versão.';
+            redirect('/app/install');
+        }
+        $downloadName = 'honeypay-database-'.preg_replace('/[^\w.\-]+/', '-', (string) $current['version']).'.sql';
+        $releases->streamSchema($current, $downloadName);
+    }
+
     if ($path === '/app/products') {
         render('customer/products', [
             'appName' => $appName,
@@ -1185,13 +1199,27 @@ if (str_starts_with($path, '/admin')) {
                     if (! is_array($file)) {
                         throw new RuntimeException('Selecione um arquivo ZIP.');
                     }
+                    $schemaFile = $_FILES['schema'] ?? null;
                     $releases->createFromUpload(
                         $file,
                         trim((string) ($_POST['version'] ?? '')),
                         trim((string) ($_POST['notes'] ?? '')) ?: null,
-                        ! empty($_POST['make_current'])
+                        ! empty($_POST['make_current']),
+                        is_array($schemaFile) ? $schemaFile : null
                     );
                     $_SESSION['flash'] = 'Release enviado com sucesso.';
+                }
+                if ($action === 'attach_schema') {
+                    $schemaFile = $_FILES['schema'] ?? null;
+                    if (! is_array($schemaFile)) {
+                        throw new RuntimeException('Selecione um arquivo .sql.');
+                    }
+                    $releases->attachSchema((int) ($_POST['id'] ?? 0), $schemaFile);
+                    $_SESSION['flash'] = 'Dump SQL anexado ao release.';
+                }
+                if ($action === 'remove_schema') {
+                    $releases->removeSchema((int) ($_POST['id'] ?? 0));
+                    $_SESSION['flash'] = 'Dump SQL removido do release.';
                 }
                 if ($action === 'set_current') {
                     $releases->setCurrent((int) ($_POST['id'] ?? 0));

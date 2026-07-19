@@ -32,6 +32,12 @@
             <p class="muted"><?= htmlspecialchars((string) $currentRelease['notes']) ?></p>
         <?php endif; ?>
         <a class="btn" href="/app/install/download">Baixar ZIP</a>
+        <?php if (! empty($currentRelease['schema_storage_path'])): ?>
+            <a class="btn btn-secondary" href="/app/install/download-schema" style="margin-left:8px">Baixar banco (SQL)</a>
+            <p class="muted" style="margin-top:12px;margin-bottom:0;font-size:13px">
+                Use o SQL na <strong>hospedagem compartilhada</strong>: importe no phpMyAdmin (banco vazio) antes de concluir o wizard <code>/install</code>.
+            </p>
+        <?php endif; ?>
     </div>
     <div class="card">
         <h2>Instalar na VPS</h2>

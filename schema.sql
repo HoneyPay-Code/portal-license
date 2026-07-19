@@ -186,7 +186,11 @@ CREATE TABLE IF NOT EXISTS releases (
     size_bytes INTEGER NOT NULL DEFAULT 0,
     notes TEXT NULL,
     is_current INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    schema_filename VARCHAR(255) NULL,
+    schema_storage_path VARCHAR(512) NULL,
+    schema_sha256 VARCHAR(64) NULL,
+    schema_size_bytes INTEGER NULL
 );
 
 CREATE TABLE IF NOT EXISTS install_download_tokens (

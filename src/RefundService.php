@@ -114,7 +114,10 @@ final class RefundService
 
         $this->updateOrderStatus($orderId, 'refund_pending');
 
-        if (! empty($order['product_id'])) {
+        $orderProduct = $this->products->findById((int) ($order['product_id'] ?? 0));
+        if ($orderProduct) {
+            $this->products->revokeEntitlementsForPurchase($customerId, $orderProduct);
+        } elseif (! empty($order['product_id'])) {
             $this->products->revokeEntitlement($customerId, (int) $order['product_id']);
         }
         $this->licenses->revokeByOrder($orderId);

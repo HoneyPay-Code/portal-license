@@ -1199,8 +1199,15 @@ if (str_starts_with($path, '/admin')) {
                     'sort_order' => (int) ($_POST['sort_order'] ?? 100),
                 ]);
                 if ($result['ok'] && ! empty($result['product']['id'])) {
+                    $newId = (int) $result['product']['id'];
+                    if ((string) ($_POST['kind'] ?? '') === ProductService::KIND_COMBO) {
+                        $included = isset($_POST['combo_included']) && is_array($_POST['combo_included'])
+                            ? array_map('intval', $_POST['combo_included'])
+                            : [];
+                        $products->setComboItems($newId, $included);
+                    }
                     $_SESSION['flash'] = $result['message'];
-                    redirect('/admin/products?edit='.(int) $result['product']['id']);
+                    redirect('/admin/products?edit='.$newId);
                 }
                 $_SESSION['flash_error'] = $result['message'];
                 redirect('/admin/products?new=1');
@@ -1220,6 +1227,17 @@ if (str_starts_with($path, '/admin')) {
                     'is_published' => ! empty($_POST['is_published']),
                     'sort_order' => (int) ($_POST['sort_order'] ?? 100),
                 ]);
+                if ($result['ok']) {
+                    $kind = (string) ($_POST['kind'] ?? '');
+                    if ($kind === ProductService::KIND_COMBO) {
+                        $included = isset($_POST['combo_included']) && is_array($_POST['combo_included'])
+                            ? array_map('intval', $_POST['combo_included'])
+                            : [];
+                        $products->setComboItems($id, $included);
+                    } else {
+                        $products->setComboItems($id, []);
+                    }
+                }
                 $_SESSION[$result['ok'] ? 'flash' : 'flash_error'] = $result['message'];
                 redirect('/admin/products?edit='.$id);
             }
@@ -1271,12 +1289,17 @@ if (str_starts_with($path, '/admin')) {
                 $products->ensureWebhookCredentials((int) $product['id']);
                 $product = $products->findById((int) $product['id']) ?? $product;
             }
+            $comboSelectable = $products->listSelectableForCombo($product ? (int) $product['id'] : null);
             render('admin/product_edit', [
                 'appName' => $appName,
                 'title' => $product ? 'Editar produto' : 'Novo produto',
                 'product' => $product,
                 'isNew' => $product === null,
                 'appUrl' => $appUrl,
+                'comboSelectable' => $comboSelectable,
+                'comboIncludedIds' => $product && ($product['kind'] ?? '') === ProductService::KIND_COMBO
+                    ? $products->comboIncludedProductIds((int) $product['id'])
+                    : [],
                 'revealWebhook' => isset($_SESSION['reveal_product_webhook'])
                     && (int) $_SESSION['reveal_product_webhook'] === (int) ($product['id'] ?? 0),
                 'csrf' => Security::csrfToken(),

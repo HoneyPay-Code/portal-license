@@ -54,6 +54,19 @@ CREATE TABLE IF NOT EXISTS products (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS product_combo_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    combo_product_id INTEGER NOT NULL,
+    included_product_id INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    UNIQUE(combo_product_id, included_product_id),
+    FOREIGN KEY (combo_product_id) REFERENCES products(id) ON DELETE CASCADE,
+    FOREIGN KEY (included_product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_combo_items_combo ON product_combo_items(combo_product_id);
+
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     external_order_id VARCHAR(64) NOT NULL UNIQUE,

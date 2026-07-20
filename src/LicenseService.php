@@ -278,6 +278,30 @@ final class LicenseService
         $stmt->execute(['status' => 'revoked', 'u' => gmdate('c'), 'oid' => $orderId]);
     }
 
+    /** @return array<string, mixed>|null */
+    public function findLicenseForOrder(int $orderId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM licenses WHERE order_id = :id ORDER BY id ASC LIMIT 1'
+        );
+        $stmt->execute(['id' => $orderId]);
+        $row = $stmt->fetch();
+
+        return $row ?: null;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findLicenseForOrderAndProduct(int $orderId, int $productId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM licenses WHERE order_id = :oid AND product_id = :pid LIMIT 1'
+        );
+        $stmt->execute(['oid' => $orderId, 'pid' => $productId]);
+        $row = $stmt->fetch();
+
+        return $row ?: null;
+    }
+
     public function clearLocalhostActivations(int $licenseId): void
     {
         $stmt = $this->pdo->prepare('DELETE FROM activations WHERE license_id = :id AND is_localhost = 1');

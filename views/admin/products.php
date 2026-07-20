@@ -13,7 +13,7 @@ $products = $products ?? [];
     <div class="row" style="justify-content:space-between;align-items:flex-start">
         <div>
             <h1 style="margin:0">Produtos</h1>
-            <p class="muted" style="margin:6px 0 0">Gateway e plugins. Após a compra (webhook), o cliente libera o download.</p>
+            <p class="muted" style="margin:6px 0 0">Gateway, plugins e combos. Após a compra (webhook), o cliente libera o download.</p>
         </div>
         <a class="btn btn-sm" href="/admin/products?new=1">Novo produto</a>
     </div>
@@ -45,11 +45,17 @@ $products = $products ?? [];
                         <strong><?= htmlspecialchars((string) $p['name']) ?></strong>
                         <div class="mono muted" style="font-size:12px"><?= htmlspecialchars((string) $p['slug']) ?></div>
                     </td>
-                    <td><span class="badge"><?= $kind === 'gateway' ? 'Gateway' : 'Plugin' ?></span></td>
+                    <td><span class="badge"><?= match ($kind) {
+                        'gateway' => 'Gateway',
+                        'combo' => 'Combo',
+                        default => 'Plugin',
+                    } ?></span></td>
                     <td><?= htmlspecialchars(ProductService::formatPrice($price, isset($p['currency']) ? (string) $p['currency'] : 'BRL')) ?></td>
                     <td class="muted">
                         <?php if ($kind === 'gateway'): ?>
                             Releases
+                        <?php elseif ($kind === 'combo'): ?>
+                            Combo
                         <?php elseif (! empty($p['plugin_zip_path'])): ?>
                             <span class="badge ok">Sim</span>
                         <?php else: ?>

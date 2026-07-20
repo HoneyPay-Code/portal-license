@@ -11,6 +11,7 @@ final class ProductService
 {
     public const KIND_GATEWAY = 'gateway';
     public const KIND_PLUGIN = 'plugin';
+    public const KIND_COMBO = 'combo';
     public const DEFAULT_GATEWAY_SLUG = 'honeypay-gateway';
 
     public function __construct(
@@ -269,7 +270,7 @@ final class ProductService
         }
 
         $kind = (string) ($data['kind'] ?? self::KIND_PLUGIN);
-        if (! in_array($kind, [self::KIND_GATEWAY, self::KIND_PLUGIN], true)) {
+        if (! in_array($kind, [self::KIND_GATEWAY, self::KIND_PLUGIN, self::KIND_COMBO], true)) {
             $kind = self::KIND_PLUGIN;
         }
 
@@ -344,7 +345,7 @@ final class ProductService
         }
 
         $kind = (string) ($data['kind'] ?? $product['kind'] ?? self::KIND_PLUGIN);
-        if (! in_array($kind, [self::KIND_GATEWAY, self::KIND_PLUGIN], true)) {
+        if (! in_array($kind, [self::KIND_GATEWAY, self::KIND_PLUGIN, self::KIND_COMBO], true)) {
             $kind = self::KIND_PLUGIN;
         }
 
@@ -656,7 +657,24 @@ final class ProductService
         );
         $stmt->execute(['cid' => $customerId, 's' => 'active']);
 
-        return $stmt->fetchAll() ?: [];
+        $rows = $stmt->fetchAll() ?: [];
+
+        return array_values(array_filter($rows, function (array $p) use ($customerId): bool {
+            if (($p['kind'] ?? '') !== self::KIND_COMBO) {
+                return true;
+            }
+            $included = $this->comboIncludedProductIds((int) $p['id']);
+            if ($included === []) {
+                return true;
+            }
+            foreach ($included as $incId) {
+                if (! $this->customerHasProduct($customerId, $incId)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }));
     }
 
     public function grantEntitlement(int $customerId, int $productId, ?int $orderId): void
@@ -703,6 +721,117 @@ final class ProductService
         $stmt->execute(['c' => $customerId, 's' => 'active']);
 
         return (int) $stmt->fetchColumn() > 0;
+    }
+
+    /** @return list<int> */
+    public function productIdsGrantedOnPurchase(array $product): array
+    {
+        if (($product['kind'] ?? '') === self::KIND_COMBO) {
+            $ids = $this->comboIncludedProductIds((int) $product['id']);
+
+            return $ids !== [] ? $ids : [];
+        }
+
+        return [(int) $product['id']];
+    }
+
+    public function purchaseFulfillmentComplete(int $customerId, array $product): bool
+    {
+        foreach ($this->productIdsGrantedOnPurchase($product) as $productId) {
+            if (! $this->customerHasProduct($customerId, $productId)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function revokeEntitlementsForPurchase(int $customerId, array $orderProduct): void
+    {
+        foreach ($this->productIdsGrantedOnPurchase($orderProduct) as $productId) {
+            $this->revokeEntitlement($customerId, $productId);
+        }
+    }
+
+    /** @return list<int> */
+    public function comboIncludedProductIds(int $comboProductId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT included_product_id FROM product_combo_items
+             WHERE combo_product_id = :cid ORDER BY sort_order ASC, id ASC'
+        );
+        $stmt->execute(['cid' => $comboProductId]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function comboIncludedProducts(int $comboProductId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT p.* FROM product_combo_items i
+             JOIN products p ON p.id = i.included_product_id
+             WHERE i.combo_product_id = :cid
+             ORDER BY i.sort_order ASC, i.id ASC'
+        );
+        $stmt->execute(['cid' => $comboProductId]);
+
+        return $stmt->fetchAll() ?: [];
+    }
+
+    /** @param list<int> $includedProductIds */
+    public function setComboItems(int $comboProductId, array $includedProductIds): void
+    {
+        $combo = $this->findById($comboProductId);
+        if (! $combo || ($combo['kind'] ?? '') !== self::KIND_COMBO) {
+            return;
+        }
+
+        $includedProductIds = array_values(array_unique(array_filter(array_map('intval', $includedProductIds))));
+        $includedProductIds = array_values(array_filter(
+            $includedProductIds,
+            fn (int $id) => $id > 0 && $id !== $comboProductId
+        ));
+
+        $this->pdo->prepare('DELETE FROM product_combo_items WHERE combo_product_id = :cid')
+            ->execute(['cid' => $comboProductId]);
+
+        $now = gmdate('c');
+        $ins = $this->pdo->prepare(
+            'INSERT INTO product_combo_items (combo_product_id, included_product_id, sort_order, created_at)
+             VALUES (:combo, :inc, :ord, :c)'
+        );
+        $sort = 0;
+        foreach ($includedProductIds as $includedId) {
+            $child = $this->findById($includedId);
+            if (! $child || ($child['kind'] ?? '') === self::KIND_COMBO) {
+                continue;
+            }
+            $ins->execute([
+                'combo' => $comboProductId,
+                'inc' => $includedId,
+                'ord' => $sort++,
+                'c' => $now,
+            ]);
+        }
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function listSelectableForCombo(?int $excludeProductId = null): array
+    {
+        $all = $this->listAll();
+        $out = [];
+        foreach ($all as $p) {
+            if (($p['kind'] ?? '') === self::KIND_COMBO) {
+                continue;
+            }
+            if ($excludeProductId !== null && (int) $p['id'] === $excludeProductId) {
+                continue;
+            }
+            $out[] = $p;
+        }
+
+        return $out;
     }
 
     public static function formatPrice(?float $price, ?string $currency = 'BRL'): string

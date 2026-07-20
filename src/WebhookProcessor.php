@@ -68,17 +68,6 @@ final class WebhookProcessor
             return ['ok' => false, 'message' => 'Missing order.id'];
         }
 
-        $existing = $this->findOrder($externalOrderId);
-        if ($existing && ($existing['status'] ?? '') === 'completed') {
-            $lic = $this->licenseForOrder((int) $existing['id']);
-
-            return [
-                'ok' => true,
-                'message' => 'Already processed',
-                'license_key' => $lic['license_key'] ?? null,
-            ];
-        }
-
         $customerData = is_array($payload['customer'] ?? null) ? $payload['customer'] : [];
         $email = strtolower(trim((string) ($customerData['email'] ?? '')));
         if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -90,16 +79,72 @@ final class WebhookProcessor
             (string) ($customerData['name'] ?? $email),
             isset($customerData['phone']) ? (string) $customerData['phone'] : null
         );
+        $customerId = (int) $customer['id'];
 
+        $product = $this->resolvePaidProduct($payload, $boundProductId);
+        if (! $product) {
+            return ['ok' => false, 'message' => 'Bound product not found'];
+        }
+
+        $existing = $this->findOrder($externalOrderId);
+        $isNewOrder = ! $existing;
+
+        if ($existing && ($existing['status'] ?? '') === 'completed') {
+            if ($this->products->purchaseFulfillmentComplete($customerId, $product)) {
+                $lic = $this->licenses->findLicenseForOrder((int) $existing['id']);
+
+                return [
+                    'ok' => true,
+                    'message' => 'Already processed',
+                    'license_key' => $lic['license_key'] ?? null,
+                ];
+            }
+
+            $orderRowId = (int) $existing['id'];
+
+            return $this->fulfillPurchase(
+                $customer,
+                $product,
+                $orderRowId,
+                $externalOrderId,
+                $payload,
+                false
+            );
+        }
+
+        $orderRowId = $this->upsertOrder(
+            $externalOrderId,
+            $customerId,
+            (int) $product['id'],
+            $payload,
+            'completed',
+            $existing
+        );
+
+        return $this->fulfillPurchase(
+            $customer,
+            $product,
+            $orderRowId,
+            $externalOrderId,
+            $payload,
+            $isNewOrder
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>|null
+     */
+    private function resolvePaidProduct(array $payload, ?int $boundProductId): ?array
+    {
         $productData = is_array($payload['product'] ?? null) ? $payload['product'] : [];
         $offerData = is_array($payload['offer'] ?? null) ? $payload['offer'] : [];
 
         if ($boundProductId !== null) {
             $product = $this->products->findById($boundProductId);
             if (! $product) {
-                return ['ok' => false, 'message' => 'Bound product not found'];
+                return null;
             }
-            // Sync external IDs from payload when empty
             $extPid = isset($productData['id']) ? (string) $productData['id'] : null;
             $extOid = isset($offerData['public_id'])
                 ? (string) $offerData['public_id']
@@ -120,82 +165,129 @@ final class WebhookProcessor
                 ]);
                 $product = $this->products->findById($boundProductId) ?? $product;
             }
-        } else {
-            $product = $this->products->upsertFromWebhook(
-                isset($productData['id']) ? (string) $productData['id'] : null,
-                isset($offerData['public_id']) ? (string) $offerData['public_id'] : (isset($offerData['id']) ? (string) $offerData['id'] : null),
-                (string) ($productData['name'] ?? 'Produto'),
-                isset($productData['type']) ? (string) $productData['type'] : null,
-                isset($productData['checkout_url']) ? (string) $productData['checkout_url'] : (isset($payload['checkoutUrl']) ? (string) $payload['checkoutUrl'] : null),
-            );
-            $this->products->ensureWebhookCredentials((int) $product['id']);
+
+            return $product;
         }
 
-        $orderRowId = $this->upsertOrder($externalOrderId, (int) $customer['id'], (int) $product['id'], $payload, 'completed');
-        $this->products->grantEntitlement((int) $customer['id'], (int) $product['id'], $orderRowId);
+        $product = $this->products->upsertFromWebhook(
+            isset($productData['id']) ? (string) $productData['id'] : null,
+            isset($offerData['public_id']) ? (string) $offerData['public_id'] : (isset($offerData['id']) ? (string) $offerData['id'] : null),
+            (string) ($productData['name'] ?? 'Produto'),
+            isset($productData['type']) ? (string) $productData['type'] : null,
+            isset($productData['checkout_url']) ? (string) $productData['checkout_url'] : (isset($payload['checkoutUrl']) ? (string) $payload['checkoutUrl'] : null),
+        );
+        $this->products->ensureWebhookCredentials((int) $product['id']);
 
-        $existingLic = $this->licenseForOrder($orderRowId);
-        if ($existingLic) {
-            $license = $existingLic;
-        } else {
+        return $product;
+    }
+
+    /**
+     * @param  array<string, mixed>  $customer
+     * @param  array<string, mixed>  $product
+     * @param  array<string, mixed>  $payload
+     * @return array{ok:bool,message:string,license_key?:string}
+     */
+    private function fulfillPurchase(
+        array $customer,
+        array $product,
+        int $orderRowId,
+        string $externalOrderId,
+        array $payload,
+        bool $sendNotifications,
+    ): array {
+        $customerId = (int) $customer['id'];
+        $grantIds = $this->products->productIdsGrantedOnPurchase($product);
+        if ($grantIds === [] && ($product['kind'] ?? '') === ProductService::KIND_COMBO) {
+            return ['ok' => false, 'message' => 'Combo sem produtos incluídos. Configure no admin.'];
+        }
+        if ($grantIds === []) {
+            $grantIds = [(int) $product['id']];
+        }
+
+        $licenseBefore = $this->licenses->findLicenseForOrder($orderRowId);
+        foreach ($grantIds as $productId) {
+            $this->products->grantEntitlement($customerId, $productId, $orderRowId);
+        }
+
+        $license = $licenseBefore;
+        foreach ($grantIds as $productId) {
+            $granted = $this->products->findById($productId);
+            if (! $granted || ($granted['kind'] ?? '') !== ProductService::KIND_GATEWAY) {
+                continue;
+            }
+            $existingLic = $this->licenses->findLicenseForOrderAndProduct($orderRowId, $productId);
+            if ($existingLic) {
+                $license = $existingLic;
+
+                continue;
+            }
             $license = $this->licenses->createLicense(
                 1,
                 'Order #'.$externalOrderId,
                 null,
-                (int) $customer['id'],
-                (int) $product['id'],
+                $customerId,
+                $productId,
                 $orderRowId
             );
         }
 
-        $portalUrl = rtrim($this->appUrl, '/');
-        $isNewAccount = empty($customer['password_hash']);
-        $setPasswordUrl = null;
-        if ($isNewAccount) {
-            $token = $this->customers->createResetToken((int) $customer['id']);
-            $setPasswordUrl = $portalUrl.'/reset-password/'.$token;
+        if ($license === null) {
+            $license = $this->licenses->findLicenseForOrder($orderRowId);
         }
 
-        $this->mailer->send(
-            (string) $customer['email'],
-            $isNewAccount ? 'Bem-vindo — defina sua senha' : 'Novo acesso — sua licença',
-            $this->mailer->welcomeHtml(
-                (string) $customer['name'],
-                $portalUrl.'/login',
-                $setPasswordUrl ?: ($portalUrl.'/forgot-password'),
-                (string) $license['license_key'],
-                $isNewAccount
-            )
-        );
+        $shouldNotify = $sendNotifications
+            || ($licenseBefore === null && $license !== null);
 
-        $amount = $payload['amount'] ?? ($payload['order']['amount'] ?? null);
-        $currency = (string) ($payload['order']['currency'] ?? ($payload['currency'] ?? 'BRL'));
-        $this->safeOutbound('order.paid', [
-            'event' => 'order.paid',
-            'customer' => [
-                'name' => (string) $customer['name'],
-                'email' => (string) $customer['email'],
-                'phone' => $customer['phone'] ?? null,
-            ],
-            'license_key' => (string) $license['license_key'],
-            'portal_url' => $portalUrl,
-            'set_password_url' => $setPasswordUrl,
-            'product' => [
-                'name' => (string) ($product['name'] ?? ''),
-                'external_id' => $product['external_product_id'] ?? ($product['external_id'] ?? null),
-            ],
-            'order' => [
-                'external_id' => $externalOrderId,
-                'amount' => $amount,
-                'currency' => $currency,
-            ],
-            'timestamp' => gmdate('c'),
-        ]);
+        if ($shouldNotify && $license) {
+            $portalUrl = rtrim($this->appUrl, '/');
+            $isNewAccount = empty($customer['password_hash']);
+            $setPasswordUrl = null;
+            if ($isNewAccount) {
+                $token = $this->customers->createResetToken($customerId);
+                $setPasswordUrl = $portalUrl.'/reset-password/'.$token;
+            }
+
+            $this->mailer->send(
+                (string) $customer['email'],
+                $isNewAccount ? 'Bem-vindo — defina sua senha' : 'Novo acesso — sua licença',
+                $this->mailer->welcomeHtml(
+                    (string) $customer['name'],
+                    $portalUrl.'/login',
+                    $setPasswordUrl ?: ($portalUrl.'/forgot-password'),
+                    (string) $license['license_key'],
+                    $isNewAccount
+                )
+            );
+
+            $amount = $payload['amount'] ?? ($payload['order']['amount'] ?? null);
+            $currency = (string) ($payload['order']['currency'] ?? ($payload['currency'] ?? 'BRL'));
+            $this->safeOutbound('order.paid', [
+                'event' => 'order.paid',
+                'customer' => [
+                    'name' => (string) $customer['name'],
+                    'email' => (string) $customer['email'],
+                    'phone' => $customer['phone'] ?? null,
+                ],
+                'license_key' => (string) $license['license_key'],
+                'portal_url' => $portalUrl,
+                'set_password_url' => $setPasswordUrl,
+                'product' => [
+                    'name' => (string) ($product['name'] ?? ''),
+                    'external_id' => $product['external_product_id'] ?? ($product['external_id'] ?? null),
+                ],
+                'order' => [
+                    'external_id' => $externalOrderId,
+                    'amount' => $amount,
+                    'currency' => $currency,
+                ],
+                'timestamp' => gmdate('c'),
+            ]);
+        }
 
         return [
             'ok' => true,
-            'message' => 'Order processed',
-            'license_key' => (string) $license['license_key'],
+            'message' => $shouldNotify ? 'Order processed' : 'Additional products granted',
+            'license_key' => $license['license_key'] ?? null,
         ];
     }
 
@@ -217,12 +309,17 @@ final class WebhookProcessor
 
         $this->updateOrderStatus((int) $order['id'], 'refunded');
         if (! empty($order['product_id']) && ! empty($order['customer_id'])) {
-            $this->products->revokeEntitlement((int) $order['customer_id'], (int) $order['product_id']);
+            $orderProduct = $this->products->findById((int) $order['product_id']);
+            if ($orderProduct) {
+                $this->products->revokeEntitlementsForPurchase((int) $order['customer_id'], $orderProduct);
+            } else {
+                $this->products->revokeEntitlement((int) $order['customer_id'], (int) $order['product_id']);
+            }
         }
         $this->licenses->revokeByOrder((int) $order['id']);
 
         $customer = $this->customers->findById((int) $order['customer_id']);
-        $license = $this->licenseForOrder((int) $order['id']);
+        $license = $this->licenses->findLicenseForOrder((int) $order['id']);
         if ($customer) {
             $this->mailer->send(
                 (string) $customer['email'],
@@ -303,34 +400,32 @@ final class WebhookProcessor
         return $row ?: null;
     }
 
-    /** @return array<string, mixed>|null */
-    private function licenseForOrder(int $orderId): ?array
-    {
-        $stmt = $this->pdo->prepare('SELECT * FROM licenses WHERE order_id = :id LIMIT 1');
-        $stmt->execute(['id' => $orderId]);
-        $row = $stmt->fetch();
-
-        return $row ?: null;
-    }
-
     /**
      * @param  array<string, mixed>  $payload
+     * @param  array<string, mixed>|null  $existing
      */
-    private function upsertOrder(string $externalOrderId, int $customerId, int $productId, array $payload, string $status): int
-    {
-        $existing = $this->findOrder($externalOrderId);
+    private function upsertOrder(
+        string $externalOrderId,
+        int $customerId,
+        int $productId,
+        array $payload,
+        string $status,
+        ?array $existing = null,
+    ): int {
+        $existing = $existing ?? $this->findOrder($externalOrderId);
         $now = gmdate('c');
         $amount = $payload['amount'] ?? ($payload['order']['amount'] ?? null);
         $currency = $payload['order']['currency'] ?? ($payload['currency'] ?? 'BRL');
         $method = $payload['paymentMethod'] ?? ($payload['payment']['method'] ?? null);
 
         if ($existing) {
+            $keepProductId = ! empty($existing['product_id']) ? (int) $existing['product_id'] : $productId;
             $stmt = $this->pdo->prepare(
                 'UPDATE orders SET status = :s, product_id = :p, amount = :a, currency = :cur, payment_method = :m, raw_json = :j, updated_at = :u WHERE id = :id'
             );
             $stmt->execute([
                 's' => $status,
-                'p' => $productId,
+                'p' => $keepProductId,
                 'a' => $amount,
                 'cur' => $currency,
                 'm' => $method,

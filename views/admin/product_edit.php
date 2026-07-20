@@ -4,9 +4,13 @@
 /** @var string $csrf */
 /** @var string|null $flash */
 /** @var string|null $error */
+/** @var list<array> $comboSelectable */
+/** @var list<int> $comboIncludedIds */
 use LicenseApi\ProductService;
 $product = $product ?? null;
 $isNew = $isNew ?? true;
+$comboSelectable = $comboSelectable ?? [];
+$comboIncludedIds = $comboIncludedIds ?? [];
 $isGatewayDefault = $product && (string) ($product['slug'] ?? '') === ProductService::DEFAULT_GATEWAY_SLUG;
 ?>
 <?php if (! empty($flash)): ?><div class="flash"><?= htmlspecialchars($flash) ?></div><?php endif; ?>
@@ -40,10 +44,11 @@ $isGatewayDefault = $product && (string) ($product['slug'] ?? '') === ProductSer
                    placeholder="ex.: plugin-integracao-x">
 
             <label>Tipo</label>
-            <select name="kind" <?= $isGatewayDefault ? 'disabled' : '' ?>>
+            <select name="kind" id="product-kind" <?= $isGatewayDefault ? 'disabled' : '' ?>>
                 <?php $kind = (string) ($product['kind'] ?? 'plugin'); ?>
                 <option value="plugin" <?= $kind === 'plugin' ? 'selected' : '' ?>>Plugin</option>
                 <option value="gateway" <?= $kind === 'gateway' ? 'selected' : '' ?>>Gateway</option>
+                <option value="combo" <?= $kind === 'combo' ? 'selected' : '' ?>>Combo (vários produtos)</option>
             </select>
             <?php if ($isGatewayDefault): ?>
                 <input type="hidden" name="kind" value="gateway">
@@ -84,6 +89,35 @@ $isGatewayDefault = $product && (string) ($product['slug'] ?? '') === ProductSer
     <label>Descrição</label>
     <textarea name="description" rows="5" placeholder="O que o cliente recebe…"><?= htmlspecialchars((string) ($product['description'] ?? '')) ?></textarea>
 
+    <div id="combo-items-section" style="margin-top:16px;<?= $kind === 'combo' ? '' : 'display:none' ?>">
+        <h2 style="margin:0 0 8px;font-size:17px">Produtos incluídos no combo</h2>
+        <p class="muted" style="margin:0 0 12px;font-size:13.5px">
+            Um único webhook deste combo libera todos os itens marcados (gateway + plugins). Use o checkout e a URL de webhook deste produto combo.
+        </p>
+        <?php if ($comboSelectable === []): ?>
+            <p class="muted">Cadastre gateway/plugins antes de montar o combo.</p>
+        <?php else: ?>
+            <div style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow:auto;padding:12px;border:1px solid var(--border);border-radius:10px">
+                <?php foreach ($comboSelectable as $opt): ?>
+                    <?php
+                        $oid = (int) $opt['id'];
+                        $checked = in_array($oid, $comboIncludedIds, true);
+                        $optKind = (string) ($opt['kind'] ?? 'plugin');
+                    ?>
+                    <label style="display:flex;align-items:flex-start;gap:10px;margin:0;font-weight:400">
+                        <input type="checkbox" name="combo_included[]" value="<?= $oid ?>" style="width:auto;margin-top:4px"
+                            <?= $checked ? 'checked' : '' ?>>
+                        <span>
+                            <strong><?= htmlspecialchars((string) $opt['name']) ?></strong>
+                            <span class="badge" style="margin-left:6px"><?= $optKind === 'gateway' ? 'Gateway' : 'Plugin' ?></span>
+                            <span class="mono muted" style="display:block;font-size:12px"><?= htmlspecialchars((string) $opt['slug']) ?></span>
+                        </span>
+                    </label>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+
     <div class="row" style="margin-top:8px">
         <button type="submit"><?= $isNew ? 'Criar produto' : 'Salvar alterações' ?></button>
         <a class="btn btn-secondary" href="/admin/products">Cancelar</a>
@@ -113,6 +147,8 @@ $isGatewayDefault = $product && (string) ($product['slug'] ?? '') === ProductSer
             <h2>ZIP do plugin</h2>
             <?php if (($product['kind'] ?? '') === 'gateway'): ?>
                 <p class="muted">O gateway usa <a href="/admin/releases">Releases</a> (ZIP oficial do sistema), não este campo.</p>
+            <?php elseif (($product['kind'] ?? '') === 'combo'): ?>
+                <p class="muted">Combos não têm ZIP. Os plugins incluídos usam o ZIP de cada produto.</p>
             <?php else: ?>
                 <?php if (! empty($product['plugin_zip_path'])): ?>
                     <p>
@@ -148,7 +184,10 @@ $isGatewayDefault = $product && (string) ($product['slug'] ?? '') === ProductSer
 
     <div class="card" style="margin-top:16px">
         <h2>Webhook deste produto</h2>
-        <p class="muted">Configure no checkout externo. Em <code>pedido_pago</code>, libera só este produto.</p>
+        <p class="muted">
+            Configure no checkout externo. Em <code>pedido_pago</code>, libera
+            <?= ($product['kind'] ?? '') === 'combo' ? 'todos os produtos incluídos no combo' : 'só este produto' ?>.
+        </p>
         <?php
             $appUrl = $appUrl ?? '';
             $revealWebhook = ! empty($revealWebhook);
@@ -214,4 +253,11 @@ var copyUrl = document.getElementById('copy-wh-url');
 if (copyUrl) copyUrl.addEventListener('click', function () { copyId('product-wh-url', copyUrl); });
 var copySecret = document.getElementById('copy-wh-secret');
 if (copySecret) copySecret.addEventListener('click', function () { copyId('product-wh-secret', copySecret); });
+var kindSelect = document.getElementById('product-kind');
+var comboSection = document.getElementById('combo-items-section');
+if (kindSelect && comboSection) {
+    kindSelect.addEventListener('change', function () {
+        comboSection.style.display = kindSelect.value === 'combo' ? '' : 'none';
+    });
+}
 </script>
